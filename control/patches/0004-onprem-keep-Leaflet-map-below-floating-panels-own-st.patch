@@ -1,0 +1,31 @@
+From 72b0e17c81750a02a7b2b0986b4e372bc3a582a7 Mon Sep 17 00:00:00 2001
+From: aeronexus <aeronexus@local>
+Date: Thu, 1 Oct 2026 21:55:25 +0200
+Subject: [PATCH] onprem: keep Leaflet map below floating panels (own stacking
+ context)
+
+Leaflet panes (z-index 400) and controls (1000) covered the live stream window
+(z-index 1) and swallowed its clicks; AMap did not create such layers.
+---
+ src/vendors/amap-leaflet-shim.ts | 5 +++++
+ 1 file changed, 5 insertions(+)
+
+diff --git a/src/vendors/amap-leaflet-shim.ts b/src/vendors/amap-leaflet-shim.ts
+index 2409b19..d962a13 100644
+--- a/src/vendors/amap-leaflet-shim.ts
++++ b/src/vendors/amap-leaflet-shim.ts
+@@ -263,6 +263,11 @@ export class Map {
+       maxZoom: 20,
+       zoomControl: true,
+     })
++    // Leaflet panes/controls use z-index 400..1000 without an own stacking context, so they would
++    // cover the app's floating panels (live window, z-index 1). AMap did not; isolate the map.
++    const el = this.leaflet.getContainer()
++    el.style.position = 'relative'
++    el.style.zIndex = '0'
+     const street = L.tileLayer(TILE_URL, { maxZoom: 20, maxNativeZoom: 19, attribution: TILE_ATTR })
+     const sat = L.tileLayer(SAT_URL, { maxZoom: 20, maxNativeZoom: 19, attribution: 'Tiles &copy; Esri' })
+     street.addTo(this.leaflet)
+-- 
+2.47.3
+

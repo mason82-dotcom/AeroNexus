@@ -38,6 +38,7 @@ Bisherige Patches:
 - **control 0001:** Mavic 3M, Matrice 4, RC Pro/RC Plus 2 in der Oberfläche, Konfiguration über Env
 - **control 0002:** Karte AMap ersetzt durch Leaflet/OpenStreetMap
 - **control 0003:** Livestream-Player im Browser (WebRTC/WHEP, HLS-Fallback)
+- **control 0004:** Leaflet-Karte bleibt unter schwebenden Fenstern (Livestream-Fenster war verdeckt)
 
 ## Schnellstart
 
