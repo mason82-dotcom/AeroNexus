@@ -1,0 +1,60 @@
+From 1123234c72be465f74c8a4b6ea8443b8b2109682 Mon Sep 17 00:00:00 2001
+From: aeronexus <aeronexus@local>
+Date: Fri, 2 Oct 2026 01:41:57 +0200
+Subject: [PATCH] onprem: RC payload firmware state with index keys (67-0-0)
+
+Pilot 2 reports payload firmware via the RC as '<type>-<subtype>-<position>'
+(seen with Mavic 3T: 67-0-0). The SDK only accepted model keys like 'M3T-0',
+so the message was dropped. Accept both; take the position from the last key
+segment and read firmware_version by name.
+---
+ .../dji/sdk/cloudapi/device/PayloadFirmwareVersion.java   | 8 ++++++--
+ .../java/com/dji/sdk/mqtt/state/RcStateDataKeyEnum.java   | 6 +++++-
+ 2 files changed, 11 insertions(+), 3 deletions(-)
+
+diff --git a/cloud-sdk/src/main/java/com/dji/sdk/cloudapi/device/PayloadFirmwareVersion.java b/cloud-sdk/src/main/java/com/dji/sdk/cloudapi/device/PayloadFirmwareVersion.java
+index 9fac3a1..8fb800c 100644
+--- a/cloud-sdk/src/main/java/com/dji/sdk/cloudapi/device/PayloadFirmwareVersion.java
++++ b/cloud-sdk/src/main/java/com/dji/sdk/cloudapi/device/PayloadFirmwareVersion.java
+@@ -21,8 +21,12 @@ public class PayloadFirmwareVersion {
+     @JsonCreator
+     public PayloadFirmwareVersion(Map<String, Object> map) {
+         Map.Entry<String, Object> entry = (Map.Entry<String, Object>) map.entrySet().toArray()[0];
+-        this.position = PayloadPositionEnum.find(Integer.parseInt(entry.getKey().split("-")[1]));
+-        this.firmwareVersion = ((Map<String, String>) entry.getValue()).values().toArray(String[]::new)[0];
++        // position is the last segment for both "M3T-0" and "67-0-0"
++        String[] key = entry.getKey().split("-");
++        this.position = PayloadPositionEnum.find(Integer.parseInt(key[key.length - 1]));
++        // only firmware_version is used; other payload state fields (if any) are ignored
++        Object version = ((Map<String, Object>) entry.getValue()).get("firmware_version");
++        this.firmwareVersion = version == null ? null : String.valueOf(version);
+     }
+ 
+     @Override
+diff --git a/cloud-sdk/src/main/java/com/dji/sdk/mqtt/state/RcStateDataKeyEnum.java b/cloud-sdk/src/main/java/com/dji/sdk/mqtt/state/RcStateDataKeyEnum.java
+index 8f959bf..3649bc2 100644
+--- a/cloud-sdk/src/main/java/com/dji/sdk/mqtt/state/RcStateDataKeyEnum.java
++++ b/cloud-sdk/src/main/java/com/dji/sdk/mqtt/state/RcStateDataKeyEnum.java
+@@ -7,6 +7,8 @@ import com.dji.sdk.exception.CloudSDKException;
+ import java.util.Arrays;
+ import java.util.Collections;
+ import java.util.Set;
++import java.util.stream.Collectors;
++import java.util.stream.Stream;
+ 
+ /**
+  *
+@@ -27,7 +29,9 @@ public enum RcStateDataKeyEnum {
+     /** RC reports its 4G dongles too (empty list without dongle) */
+     DONGLE_INFOS(Set.of("dongle_infos"), DongleInfos.class),
+ 
+-    PAYLOAD_FIRMWARE(PayloadModelConst.getAllModelWithPosition(), PayloadFirmwareVersion.class),
++    // Pilot 2 reports payload firmware as "<type>-<subtype>-<position>" (e.g. 67-0-0), older docs as "M3T-0"
++    PAYLOAD_FIRMWARE(Stream.concat(PayloadModelConst.getAllModelWithPosition().stream(),
++            PayloadModelConst.getAllIndexWithPosition().stream()).collect(Collectors.toSet()), PayloadFirmwareVersion.class),
+     ;
+ 
+     private final Set<String> keys;
+-- 
+2.47.3
+

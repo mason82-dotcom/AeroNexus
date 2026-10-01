@@ -38,6 +38,7 @@ Bisherige Patches:
 - **api 0005:** Livestream-Status vom RC wird angenommen (Sample warf bei jeder Meldung eine Exception)
 - **api 0006:** Geometrie-Routen aus Pilot 2 (Typ 4 `mappingPrism`, 5 `mappingCylinder`) landen in der Wegpunkt-Bibliothek
 - **api 0007:** Medien-Upload der M3M-Multispektral-TIFs (Pilot schickt dort kein Aufnahmedatum)
+- **api 0008:** Kamera-Firmware vom RC im Format `67-0-0` (M3T) wird angenommen
 - **control 0001:** Mavic 3M, Matrice 4, RC Pro/RC Plus 2 in der Oberfläche, Konfiguration über Env
 - **control 0002:** Karte AMap ersetzt durch Leaflet/OpenStreetMap
 - **control 0003:** Livestream-Player im Browser (WebRTC/WHEP, HLS-Fallback)
