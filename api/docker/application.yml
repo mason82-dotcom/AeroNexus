@@ -1,0 +1,126 @@
+# onprem override, mounted to /app/config/application.yml
+# All ${...} values come from .env via docker-compose "environment".
+server:
+  port: 6789
+
+spring:
+  main:
+    allow-bean-definition-overriding: true
+  application:
+    name: cloud-api-onprem
+  datasource:
+    druid:
+      type: com.alibaba.druid.pool.DruidDataSource
+      driver-class-name: com.mysql.cj.jdbc.Driver
+      url: jdbc:mysql://mysql:3306/cloud_sample?useSSL=false&allowPublicKeyRetrieval=true&characterEncoding=utf8
+      username: root
+      password: ${MYSQL_ROOT_PASSWORD}
+      initial-size: 5
+      min-idle: 5
+      max-active: 20
+      max-wait: 60000
+  redis:
+    host: redis
+    port: 6379
+    database: 0
+    password: ${REDIS_PASSWORD}
+    lettuce:
+      pool:
+        max-active: 8
+        max-idle: 8
+        min-idle: 0
+  servlet:
+    multipart:
+      max-file-size: 2GB
+      max-request-size: 2GB
+
+jwt:
+  issuer: DJI
+  subject: CloudApiOnPrem
+  secret: ${JWT_SECRET}
+  age: 86400
+
+# BASIC address is handed to DJI Pilot 2 unchanged AND used by the backend itself.
+# LAN mode: tcp://SERVER_HOST:1883   TLS mode: wss://HUB_DOMAIN:443/mqtt (via Caddy)
+mqtt:
+  BASIC:
+    protocol: ${MQTT_PROTOCOL}
+    host: ${MQTT_HOST}
+    port: ${MQTT_PORT}
+    username: ${MQTT_SERVER_USER}
+    password: ${MQTT_SERVER_PASSWORD}
+    client-id: onprem-backend
+    path: ${MQTT_PATH}
+  DRC:
+    protocol: ${DRC_PROTOCOL}
+    host: ${DRC_HOST}
+    port: ${DRC_PORT}
+    path: /mqtt
+    username: ${MQTT_SERVER_USER}
+    password: ${MQTT_SERVER_PASSWORD}
+
+cloud-sdk:
+  mqtt:
+    inbound-topic: sys/product/+/status,thing/product/+/requests
+
+url:
+  manage:  { prefix: manage,  version: /api/v1 }
+  map:     { prefix: map,     version: /api/v1 }
+  media:   { prefix: media,   version: /api/v1 }
+  wayline: { prefix: wayline, version: /api/v1 }
+  storage: { prefix: storage, version: /api/v1 }
+  control: { prefix: control, version: /api/v1 }
+
+# MinIO + STS AssumeRole. endpoint is handed to Pilot 2 for direct uploads -> LAN address!
+oss:
+  enable: true
+  provider: MINIO
+  endpoint: ${OSS_ENDPOINT}
+  access-key: ${MINIO_STS_USER}
+  secret-key: ${MINIO_STS_PASSWORD}
+  expire: 3600
+  region: us-east-1
+  role-session-name: cloudApi
+  role-arn: arn:minio:iam:::role/dummy
+  bucket: ${MINIO_BUCKET}
+  object-dir-prefix: wayline
+
+logging:
+  level:
+    com.dji: ${LOG_LEVEL}
+  file:
+    name: logs/cloud-api-onprem.log
+
+ntp:
+  server:
+    host: ${NTP_SERVER}
+
+cloud-api:
+  app:
+    id: ${DJI_APP_ID}
+    key: ${DJI_APP_KEY}
+    license: ${DJI_APP_LICENSE}
+
+livestream:
+  url:
+    agora:
+      channel: unused
+      token: unused
+      uid: 654321
+    rtmp:
+      url: rtmp://${SERVER_HOST}:1935/live/
+    rtsp:
+      username: ${RTSP_USER}
+      password: ${RTSP_PASSWORD}
+      port: 8554
+    gb28181:
+      serverIP: unused
+      serverPort: unused
+      serverID: unused
+      agentID: unused
+      agentPassword: unused
+      localPort: unused
+      channel: unused
+    whip:
+      # {stream} is replaced by <droneSn>-<payloadIndex> (backend patch 0002)
+      url: "${WHIP_URL}"

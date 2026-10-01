@@ -1,0 +1,7 @@
+edge/.env
+edge/runtime/
+edge/data/
+edge/logs/
+node_modules/
+target/
+dist/

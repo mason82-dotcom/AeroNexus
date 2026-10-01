@@ -1,0 +1,20 @@
+# RTMP ingest from DJI Pilot 2 -> WebRTC / HLS / RTSP for browser and VLC
+logLevel: info
+rtmp: yes
+rtmpAddress: :1935
+rtsp: yes
+rtspAddress: :8554
+hls: yes
+hlsAddress: :8888
+hlsAllowOrigin: '*'
+hlsVariant: lowLatency
+webrtc: yes
+webrtcAddress: :8889
+webrtcAllowOrigin: '*'
+# media over UDP; container runs with host network, so the LAN IP is announced directly
+webrtcLocalUDPAddress: :8189
+api: yes
+apiAddress: :9997
+paths:
+  # accept any stream name (Pilot appends its own video id to rtmp://host:1935/live/)
+  all_others:

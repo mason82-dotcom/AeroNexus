@@ -1,0 +1,40 @@
+# Rendered by setup.sh into caddy/Caddyfile. {$VAR} are resolved by Caddy at runtime from its environment.
+{
+	email {$ACME_EMAIL}
+}
+
+(hub_tls) {
+	__TLS_BLOCK__
+}
+
+{$HUB_DOMAIN} {
+	import hub_tls
+	encode gzip
+
+	# first match wins (route keeps this order)
+	route {
+		# backend REST API (prefixes from application.yml url.*)
+		@api path /manage/api/* /map/api/* /media/api/* /wayline/api/* /storage/api/* /control/api/*
+		reverse_proxy @api {$UP_API:api:6789}
+
+		# backend websocket (push to web UI)
+		reverse_proxy /api/v1/ws* {$UP_API:api:6789}
+
+		# MQTT over WebSocket for DJI Pilot 2 and the backend
+		reverse_proxy /mqtt {$UP_EMQX_WS:emqx:8083}
+
+		# livestream: WHEP/WHIP signalling -> MediaMTX WebRTC, everything else under /live -> HLS
+		@webrtc path_regexp ^/live/.+/(whep|whip)(/.*)?$
+		reverse_proxy @webrtc {$UP_MEDIAMTX_WEBRTC:host.docker.internal:8889}
+		reverse_proxy /live/* {$UP_MEDIAMTX_HLS:host.docker.internal:8888}
+
+		# web UI (SPA, includes /pilot-login)
+		reverse_proxy {$UP_CONTROL:control:80}
+	}
+}
+
+{$S3_DOMAIN} {
+	import hub_tls
+	# MinIO S3 API. Host header is passed through unchanged (needed for S3 signatures).
+	reverse_proxy {$UP_MINIO:minio:9000}
+}

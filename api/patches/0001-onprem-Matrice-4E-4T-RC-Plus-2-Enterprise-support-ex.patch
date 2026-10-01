@@ -1,0 +1,135 @@
+From 8e8330c6bf4c4040fa2fb3cf7ac1ecc80a1ab0fe Mon Sep 17 00:00:00 2001
+From: onprem <onprem@local>
+Date: Thu, 1 Oct 2026 15:27:45 +0000
+Subject: [PATCH] onprem: Matrice 4E/4T + RC Plus 2 Enterprise support,
+ executable fat jar
+
+---
+ .../dji/sdk/cloudapi/device/DeviceEnum.java   | 11 ++++++++
+ .../sdk/cloudapi/device/DeviceTypeEnum.java   | 13 ++++++++++
+ .../sdk/config/version/GatewayTypeEnum.java   |  2 +-
+ sample/pom.xml                                | 26 +++++++++++++++++++
+ .../manage/model/enums/PayloadModelEnum.java  | 12 ++++++++-
+ 5 files changed, 62 insertions(+), 2 deletions(-)
+
+diff --git a/cloud-sdk/src/main/java/com/dji/sdk/cloudapi/device/DeviceEnum.java b/cloud-sdk/src/main/java/com/dji/sdk/cloudapi/device/DeviceEnum.java
+index cab8c70..a9869f4 100644
+--- a/cloud-sdk/src/main/java/com/dji/sdk/cloudapi/device/DeviceEnum.java
++++ b/cloud-sdk/src/main/java/com/dji/sdk/cloudapi/device/DeviceEnum.java
+@@ -76,6 +76,17 @@ public enum DeviceEnum {
+     M3D_CAMERA(DeviceDomainEnum.PAYLOAD, DeviceTypeEnum.M3D_CAMERA, DeviceSubTypeEnum.ZERO),
+ 
+     M3TD_CAMERA(DeviceDomainEnum.PAYLOAD, DeviceTypeEnum.M3TD_CAMERA, DeviceSubTypeEnum.ZERO),
++
++    /* --- Matrice 4 series + DJI RC Plus 2 Enterprise --- */
++    M4E(DeviceDomainEnum.DRONE, DeviceTypeEnum.M4, DeviceSubTypeEnum.ZERO),
++
++    M4T(DeviceDomainEnum.DRONE, DeviceTypeEnum.M4, DeviceSubTypeEnum.ONE),
++
++    M4E_CAMERA(DeviceDomainEnum.PAYLOAD, DeviceTypeEnum.M4E_CAMERA, DeviceSubTypeEnum.ZERO),
++
++    M4T_CAMERA(DeviceDomainEnum.PAYLOAD, DeviceTypeEnum.M4T_CAMERA, DeviceSubTypeEnum.ZERO),
++
++    RC_PLUS_2(DeviceDomainEnum.REMOTER_CONTROL, DeviceTypeEnum.RC_PLUS_2, DeviceSubTypeEnum.ZERO),
+     ;
+ 
+     @Schema(enumAsRef = true)
+diff --git a/cloud-sdk/src/main/java/com/dji/sdk/cloudapi/device/DeviceTypeEnum.java b/cloud-sdk/src/main/java/com/dji/sdk/cloudapi/device/DeviceTypeEnum.java
+index e1a23cc..b75fb63 100644
+--- a/cloud-sdk/src/main/java/com/dji/sdk/cloudapi/device/DeviceTypeEnum.java
++++ b/cloud-sdk/src/main/java/com/dji/sdk/cloudapi/device/DeviceTypeEnum.java
+@@ -66,6 +66,19 @@ public enum DeviceTypeEnum {
+     M3D_CAMERA(80),
+ 
+     M3TD_CAMERA(81),
++
++    /* --- Matrice 4 series (Cloud API >= 1.12) --- */
++    M4(99),
++
++    M4E_CAMERA(88),
++
++    /*
++     * NOTE: type 89 is shared with M350 (drone domain). find(89) returns M350;
++     * this is harmless because DeviceEnum resolves by (domain,type,subType) integers.
++     */
++    M4T_CAMERA(89),
++
++    RC_PLUS_2(174),
+     ;
+ 
+     private final int type;
+diff --git a/cloud-sdk/src/main/java/com/dji/sdk/config/version/GatewayTypeEnum.java b/cloud-sdk/src/main/java/com/dji/sdk/config/version/GatewayTypeEnum.java
+index 4e9d295..6259d91 100644
+--- a/cloud-sdk/src/main/java/com/dji/sdk/config/version/GatewayTypeEnum.java
++++ b/cloud-sdk/src/main/java/com/dji/sdk/config/version/GatewayTypeEnum.java
+@@ -12,7 +12,7 @@ import java.util.Arrays;
+  */
+ public enum GatewayTypeEnum {
+ 
+-    RC(DeviceEnum.RC, DeviceEnum.RC_PLUS, DeviceEnum.RC_PRO),
++    RC(DeviceEnum.RC, DeviceEnum.RC_PLUS, DeviceEnum.RC_PRO, DeviceEnum.RC_PLUS_2),
+ 
+     DOCK(DeviceEnum.DOCK),
+ 
+diff --git a/sample/pom.xml b/sample/pom.xml
+index 575608d..e3369d6 100644
+--- a/sample/pom.xml
++++ b/sample/pom.xml
+@@ -145,4 +145,30 @@
+         </dependency>
+ 
+     </dependencies>
++    <!-- onprem: produce an executable fat jar for the Docker image -->
++    <build>
++        <plugins>
++            <plugin>
++                <groupId>org.springframework.boot</groupId>
++                <artifactId>spring-boot-maven-plugin</artifactId>
++                <version>2.7.12</version>
++                <configuration>
++                    <mainClass>com.dji.sample.CloudApiSampleApplication</mainClass>
++                    <excludes>
++                        <exclude>
++                            <groupId>org.projectlombok</groupId>
++                            <artifactId>lombok</artifactId>
++                        </exclude>
++                    </excludes>
++                </configuration>
++                <executions>
++                    <execution>
++                        <goals>
++                            <goal>repackage</goal>
++                        </goals>
++                    </execution>
++                </executions>
++            </plugin>
++        </plugins>
++    </build>
+ </project>
+\ No newline at end of file
+diff --git a/sample/src/main/java/com/dji/sample/manage/model/enums/PayloadModelEnum.java b/sample/src/main/java/com/dji/sample/manage/model/enums/PayloadModelEnum.java
+index 5633b03..c4a50e9 100644
+--- a/sample/src/main/java/com/dji/sample/manage/model/enums/PayloadModelEnum.java
++++ b/sample/src/main/java/com/dji/sample/manage/model/enums/PayloadModelEnum.java
+@@ -31,7 +31,17 @@ public enum PayloadModelEnum {
+ 
+     DOCK("DOCK", "165-0"),
+ 
+-    L1("L1", "90742-0");
++    L1("L1", "90742-0"),
++
++    M3E_CAMERA("M3E Camera", "66-0"),
++
++    M3T_CAMERA("M3T Camera", "67-0"),
++
++    M3M_CAMERA("M3M Camera", "68-0"),
++
++    M4E_CAMERA("M4E Camera", "88-0"),
++
++    M4T_CAMERA("M4T Camera", "89-0");
+ 
+     private String model;
+ 
+-- 
+2.43.0
+

@@ -1,0 +1,30 @@
+From 75ca0d283f17670cebc884423c31f0bca5304c9a Mon Sep 17 00:00:00 2001
+From: onprem <onprem@local>
+Date: Thu, 1 Oct 2026 16:11:55 +0000
+Subject: [PATCH] onprem: WHIP url supports {stream} placeholder (MediaMTX)
+
+---
+ .../sample/manage/service/impl/LiveStreamServiceImpl.java  | 7 ++++++-
+ 1 file changed, 6 insertions(+), 1 deletion(-)
+
+diff --git a/sample/src/main/java/com/dji/sample/manage/service/impl/LiveStreamServiceImpl.java b/sample/src/main/java/com/dji/sample/manage/service/impl/LiveStreamServiceImpl.java
+index 300c88a..b8de823 100644
+--- a/sample/src/main/java/com/dji/sample/manage/service/impl/LiveStreamServiceImpl.java
++++ b/sample/src/main/java/com/dji/sample/manage/service/impl/LiveStreamServiceImpl.java
+@@ -226,7 +226,12 @@ public class LiveStreamServiceImpl implements ILiveStreamService {
+                 return gbUrl.setChannel(gbUrl.getChannel().substring(0, 20 - deviceType.length()) + deviceType);
+             case WHIP:
+                 LivestreamWhipUrl whipUrl = (LivestreamWhipUrl) url.clone();
+-                return whipUrl.setUrl(whipUrl.getUrl() + videoId.getDroneSn() + "-" + videoId.getPayloadIndex().toString());
++                String stream = videoId.getDroneSn() + "-" + videoId.getPayloadIndex().toString();
++                // onprem: MediaMTX needs the stream name in the middle (.../live/{stream}/whip)
++                if (whipUrl.getUrl().contains("{stream}")) {
++                    return whipUrl.setUrl(whipUrl.getUrl().replace("{stream}", stream));
++                }
++                return whipUrl.setUrl(whipUrl.getUrl() + stream);
+         }
+         return url;
+     }
+-- 
+2.43.0
+

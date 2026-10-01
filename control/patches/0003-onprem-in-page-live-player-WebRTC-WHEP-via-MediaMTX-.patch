@@ -1,0 +1,409 @@
+From edb1d47a3d84984f02dc9063952f7a7f35b7235c Mon Sep 17 00:00:00 2001
+From: onprem <onprem@local>
+Date: Thu, 1 Oct 2026 16:12:18 +0000
+Subject: [PATCH] onprem: in-page live player (WebRTC/WHEP via MediaMTX, HLS
+ fallback)
+
+---
+ package.json                         |   1 +
+ src/api/http/config.ts               |   4 +
+ src/components/livestream-others.vue |  41 +++++----
+ src/vendors/live-player.ts           | 124 ++++++++++++++++++++++++++
+ src/vendors/whep-player.ts           | 125 +++++++++++++++++++++++++++
+ yarn.lock                            |   5 ++
+ 6 files changed, 283 insertions(+), 17 deletions(-)
+ create mode 100644 src/vendors/live-player.ts
+ create mode 100644 src/vendors/whep-player.ts
+
+diff --git a/package.json b/package.json
+index c7877c0..a029a14 100644
+--- a/package.json
++++ b/package.json
+@@ -16,6 +16,7 @@
+     "ant-design-vue": "^2.2.8",
+     "axios": "^0.21.1",
+     "eventemitter3": "^5.0.0",
++    "hls.js": "1.5.20",
+     "leaflet": "1.9.4",
+     "mitt": "^3.0.0",
+     "mqtt": "^4.3.7",
+diff --git a/src/api/http/config.ts b/src/api/http/config.ts
+index a2affa0..a440fb9 100644
+--- a/src/api/http/config.ts
++++ b/src/api/http/config.ts
+@@ -14,6 +14,10 @@ export const CURRENT_CONFIG = {
+ 
+   // livestreaming (RTMP ingest on MediaMTX)
+   rtmpURL: env.VITE_RTMP_URL || '',
++  // WebRTC playback base of MediaMTX, e.g. http://192.168.1.10:8889/ (WHEP endpoints below it)
++  whepBase: env.VITE_WHEP_BASE || '',
++  // HLS fallback base of MediaMTX, e.g. http://192.168.1.10:8888/
++  hlsBase: env.VITE_HLS_BASE || '',
+   // GB28181 (unused on-prem)
+   gbServerIp: '',
+   gbServerPort: '',
+diff --git a/src/components/livestream-others.vue b/src/components/livestream-others.vue
+index aad4192..6baad20 100644
+--- a/src/components/livestream-others.vue
++++ b/src/components/livestream-others.vue
+@@ -8,6 +8,7 @@
+       autoplay
+       class="mt20"
+     ></video>
++    <p v-if="playerState" class="mt10">Player: {{ playerState }}</p>
+     <p class="fz24">Live streaming source selection</p>
+ 
+     <div class="flex-row flex-justify-center flex-align-center mt10">
+@@ -116,12 +117,13 @@
+ 
+ <script lang="ts" setup>
+ import { message } from 'ant-design-vue'
+-import { onMounted, reactive, ref } from 'vue'
++import { onBeforeUnmount, onMounted, reactive, ref } from 'vue'
+ import { CURRENT_CONFIG as config } from '/@/api/http/config'
+ import { changeLivestreamLens, getLiveCapacity, setLivestreamQuality, startLivestream, stopLivestream } from '/@/api/manage'
+ import { getRoot } from '/@/root'
+ import jswebrtc from '/@/vendors/jswebrtc.min.js'
+ import srs from '/@/vendors/srs.sdk.js'
++import { LivePlayer } from '/@/vendors/live-player'
+ 
+ const root = getRoot()
+ 
+@@ -190,6 +192,22 @@ const lensSelected = ref<String>()
+ const isDockLive = ref(false)
+ const nonSwitchable = 'normal'
+ let webrtc: any = null
++// onprem: playback from MediaMTX - WebRTC (WHEP) first, HLS fallback
++const livePlayer = new LivePlayer()
++const playerState = ref('')
++function playViaWhep (backendUrl: string) {
++  const videoElement = videowebrtc.value as unknown as HTMLVideoElement
++  livePlayer.play(videoElement, backendUrl, {
++    whepBase: config.whepBase,
++    hlsBase: config.hlsBase,
++    onState: (st: string) => { playerState.value = st },
++  }).catch(err => { playerState.value = 'error: ' + (err?.message || err) })
++}
++onBeforeUnmount(() => livePlayer.close())
++function stopWhep () {
++  livePlayer.close()
++  playerState.value = ''
++}
+ 
+ const onRefresh = async () => {
+   droneList.value = []
+@@ -303,22 +321,10 @@ const onStart = async () => {
+       } else if (livetypeSelected.value === 2) {
+         console.log(res)
+         rtspData.value = 'url:' + res.data.url
+-      } else if (livetypeSelected.value === 1) {
+-        const url = res.data.url
+-        const videoElement = videowebrtc.value
+-        console.log('start live:', url)
+-        console.log(videoElement)
+-        const player = new jswebrtc.Player(url, {
+-          video: videoElement,
+-          autoplay: true,
+-          onPlay: (obj: any) => {
+-            console.log('start play livestream')
+-          }
+-        })
+-      } else if (livetypeSelected.value === 4) {
+-        const videoElement = videowebrtc.value as unknown as HTMLMediaElement
+-        videoElement.muted = true
+-        playWebrtc(videoElement, res.data.url)
++      } else if (livetypeSelected.value === 1 || livetypeSelected.value === 4) {
++        // RTMP (drone -> MediaMTX) or WHIP: play back as WebRTC via WHEP
++        console.log('start live:', res.data.url)
++        playViaWhep(res.data.url)
+       }
+       liveState.value = true
+     })
+@@ -335,6 +341,7 @@ const onStop = () => {
+   }).then(res => {
+     if (res.code === 0) {
+       message.success(res.message)
++      stopWhep()
+       liveState.value = false
+       lensSelected.value = undefined
+       console.log('stop play livestream')
+diff --git a/src/vendors/live-player.ts b/src/vendors/live-player.ts
+new file mode 100644
+index 0000000..7df1961
+--- /dev/null
++++ b/src/vendors/live-player.ts
+@@ -0,0 +1,124 @@
++/*
++ * onprem: live player for MediaMTX.
++ *   1. WebRTC via WHEP  (~0.3 s latency)  - needs H.264 in the browser's WebRTC stack
++ *   2. HLS via hls.js   (~2-4 s latency)  - fallback, uses MSE (H.264 almost everywhere)
++ * DJI Pilot 2 pushes H.264 over RTMP; MediaMTX does not transcode.
++ */
++import Hls from 'hls.js'
++import { WhepPlayer, toWhepUrl } from './whep-player'
++
++export type LiveMode = 'webrtc' | 'hls'
++
++export function browserHasWebrtcH264 (): boolean {
++  try {
++    const caps = (window as any).RTCRtpReceiver?.getCapabilities?.('video')
++    return !!caps?.codecs?.some((c: any) => /h264/i.test(c.mimeType))
++  } catch (_) {
++    return false
++  }
++}
++
++export function toHlsUrl (backendUrl: string, hlsBase: string): string {
++  // reuse the WHEP path logic, then swap the suffix
++  const whep = toWhepUrl(backendUrl.replace(/\/whep\/?$/, ''), hlsBase)
++  return whep.replace(/\/whep$/, '/index.m3u8')
++}
++
++export class LivePlayer {
++  private whep: WhepPlayer | null = null
++  private hls: Hls | null = null
++  private video: HTMLVideoElement | null = null
++  mode: LiveMode | null = null
++  private session = 0
++
++  async play (video: HTMLVideoElement, backendUrl: string,
++    cfg: { whepBase: string, hlsBase: string, onState?: (s: string) => void }) {
++    this.close()
++    this.video = video
++    const state = cfg.onState || (() => undefined)
++
++    if (browserHasWebrtcH264()) {
++      try {
++        this.mode = 'webrtc'
++        this.whep = new WhepPlayer()
++        await this.whep.play(video, toWhepUrl(backendUrl, cfg.whepBase),
++          { onState: s => state('WebRTC: ' + s) })
++        return
++      } catch (e: any) {
++        this.whep?.close()
++        this.whep = null
++        if (!/codecs not supported/i.test(String(e?.message))) throw e
++        state('WebRTC codec mismatch, falling back to HLS')
++      }
++    } else {
++      state('browser has no WebRTC H.264, using HLS')
++    }
++    const url = toHlsUrl(backendUrl, cfg.hlsBase)
++    const token = ++this.session
++    // stream appears a few seconds after live_start_push -> playlist is 404 at first
++    for (let i = 1; i <= 25; i++) {
++      if (token !== this.session) return // closed or restarted meanwhile
++      try {
++        const res = await fetch(url, { cache: 'no-store' })
++        if (res.ok) break
++      } catch (_) { /* server not reachable yet */ }
++      state(`HLS: waiting for stream (${i}/25)`)
++      await new Promise(resolve => setTimeout(resolve, 1500))
++    }
++    if (token !== this.session) return
++    this.playHls(video, url, state)
++  }
++
++  private playHls (video: HTMLVideoElement, url: string, state: (s: string) => void) {
++    this.mode = 'hls'
++    video.muted = true
++    if (Hls.isSupported()) {
++      const hls = new Hls({ lowLatencyMode: true, liveSyncDurationCount: 2 })
++      this.hls = hls
++      let recoveries = 0
++      hls.on(Hls.Events.MANIFEST_PARSED, () => {
++        state('HLS: playing')
++        video.play().catch(() => undefined)
++      })
++      hls.on(Hls.Events.ERROR, (_e, data) => {
++        if (!data.fatal) return
++        if (data.details === Hls.ErrorDetails.MANIFEST_INCOMPATIBLE_CODECS_ERROR) {
++          state('error: this browser cannot decode the stream codec (H.264/H.265). Use current Chrome, Edge, Firefox or Safari.')
++          hls.destroy()
++          if (this.hls === hls) this.hls = null
++          return
++        }
++        if (data.type === Hls.ErrorTypes.MEDIA_ERROR && recoveries++ < 3) {
++          hls.recoverMediaError()
++          return
++        }
++        state('HLS error: ' + data.details)
++      })
++      state('HLS: loading')
++      hls.loadSource(url)
++      hls.attachMedia(video)
++    } else if (video.canPlayType('application/vnd.apple.mpegurl')) {
++      // Safari / iOS: native HLS
++      video.src = url
++      video.play().catch(() => undefined)
++      state('HLS (native): playing')
++    } else {
++      state('error: neither WebRTC H.264 nor HLS is supported by this browser')
++    }
++  }
++
++  close () {
++    this.session++
++    this.whep?.close()
++    this.whep = null
++    this.hls?.destroy()
++    this.hls = null
++    if (this.video) {
++      this.video.srcObject = null
++      this.video.removeAttribute('src')
++      this.video.load()
++    }
++    this.video = null
++    this.mode = null
++  }
++}
+diff --git a/src/vendors/whep-player.ts b/src/vendors/whep-player.ts
+new file mode 100644
+index 0000000..f349386
+--- /dev/null
++++ b/src/vendors/whep-player.ts
+@@ -0,0 +1,125 @@
++/*
++ * onprem: minimal WHEP (WebRTC-HTTP Egress Protocol) player for MediaMTX.
++ *
++ * MediaMTX exposes every path as  http://<host>:8889/<path>/whep
++ * The drone needs a few seconds after "live_start_push" before the stream exists,
++ * so play() retries while the server answers 404.
++ */
++
++export interface WhepOptions {
++  retries?: number // attempts while the stream is not yet published
++  retryDelayMs?: number
++  onState?: (state: string) => void
++}
++
++const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms))
++
++export class WhepPlayer {
++  private pc: RTCPeerConnection | null = null
++  private resource: string | null = null
++  private closed = false
++
++  async play (video: HTMLVideoElement, whepUrl: string, opts: WhepOptions = {}): Promise<void> {
++    const retries = opts.retries ?? 20
++    const delay = opts.retryDelayMs ?? 1500
++    const state = opts.onState || (() => undefined)
++    this.closed = false
++
++    for (let attempt = 1; attempt <= retries && !this.closed; attempt++) {
++      state(attempt === 1 ? 'connecting' : `waiting for stream (${attempt}/${retries})`)
++      try {
++        await this.connect(video, whepUrl)
++        state('playing')
++        return
++      } catch (e: any) {
++        this.teardownPc()
++        if (e?.status !== 404) { // 404 = path exists but nothing is published yet
++          state('error: ' + (e?.message || e))
++          throw e
++        }
++        await sleep(delay)
++      }
++    }
++    if (!this.closed) {
++      state('error: stream did not start')
++      throw new Error('WHEP: stream did not start in time')
++    }
++  }
++
++  private async connect (video: HTMLVideoElement, whepUrl: string) {
++    const pc = new RTCPeerConnection({ iceServers: [] }) // LAN: host candidates are enough
++    this.pc = pc
++    pc.addTransceiver('video', { direction: 'recvonly' })
++    pc.addTransceiver('audio', { direction: 'recvonly' })
++
++    const stream = new MediaStream()
++    pc.ontrack = (ev) => {
++      stream.addTrack(ev.track)
++      if (video.srcObject !== stream) video.srcObject = stream
++    }
++
++    const offer = await pc.createOffer()
++    await pc.setLocalDescription(offer)
++    await this.waitIceGathering(pc, 2000)
++
++    const res = await fetch(whepUrl, {
++      method: 'POST',
++      headers: { 'Content-Type': 'application/sdp' },
++      body: pc.localDescription!.sdp,
++    })
++    if (res.status !== 201 && res.status !== 200) {
++      let detail = ''
++      try { detail = (await res.text()).trim() } catch (_) { /* ignore */ }
++      if (/codecs not supported/i.test(detail)) detail += ' (browser cannot decode the stream codec; use Chrome/Edge/Firefox with H.264 support)'
++      const err: any = new Error(`WHEP HTTP ${res.status}${detail ? ': ' + detail : ''}`)
++      err.status = res.status
++      throw err
++    }
++    const loc = res.headers.get('Location')
++    this.resource = loc ? new URL(loc, whepUrl).toString() : null
++    const answer = await res.text()
++    await pc.setRemoteDescription({ type: 'answer', sdp: answer })
++    video.muted = true // browsers only autoplay muted video
++    await video.play().catch(() => undefined)
++  }
++
++  private waitIceGathering (pc: RTCPeerConnection, timeoutMs: number): Promise<void> {
++    if (pc.iceGatheringState === 'complete') return Promise.resolve()
++    return new Promise(resolve => {
++      const done = () => { pc.removeEventListener('icegatheringstatechange', check); resolve() }
++      const check = () => { if (pc.iceGatheringState === 'complete') done() }
++      pc.addEventListener('icegatheringstatechange', check)
++      setTimeout(done, timeoutMs)
++    })
++  }
++
++  private teardownPc () {
++    if (this.pc) {
++      this.pc.ontrack = null
++      this.pc.close()
++    }
++    this.pc = null
++  }
++
++  close () {
++    this.closed = true
++    if (this.resource) {
++      fetch(this.resource, { method: 'DELETE' }).catch(() => undefined)
++      this.resource = null
++    }
++    this.teardownPc()
++  }
++}
++
++/*
++ * Map whatever URL the backend returns to the WHEP endpoint on MediaMTX.
++ *   RTMP:  webrtc://host:1935/live/<name>       -> <whepBase>live/<name>/whep
++ *   WHIP:  http://host:8889/live/<name>/whep    -> unchanged
++ */
++export function toWhepUrl (backendUrl: string, whepBase: string): string {
++  if (/\/whep\/?$/.test(backendUrl) && /^https?:/.test(backendUrl)) return backendUrl
++  const m = backendUrl.match(/^[a-z]+:\/\/[^/]+\/(.+)$/i)
++  const path = m ? m[1].replace(/\/+$/, '') : backendUrl
++  const base = whepBase.endsWith('/') ? whepBase : whepBase + '/'
++  return `${base}${path}/whep`
++}
+diff --git a/yarn.lock b/yarn.lock
+index 20c0159..2bb5b6c 100644
+--- a/yarn.lock
++++ b/yarn.lock
+@@ -2199,6 +2199,11 @@ help-me@^3.0.0:
+     glob "^7.1.6"
+     readable-stream "^3.6.0"
+ 
++hls.js@1.5.20:
++  version "1.5.20"
++  resolved "https://registry.yarnpkg.com/hls.js/-/hls.js-1.5.20.tgz#7eb23bb5e2595311d4e2761038ca6882673de7e2"
++  integrity sha512-uu0VXUK52JhihhnN/MVVo1lvqNNuhoxkonqgO3IpjvQiGpJBdIXMGkofjQb/j9zvV7a1SW8U9g1FslWx/1HOiQ==
++
+ htmlparser2@^3.8.3:
+   version "3.10.1"
+   resolved "https://registry.yarnpkg.com/htmlparser2/-/htmlparser2-3.10.1.tgz"
+-- 
+2.43.0
+

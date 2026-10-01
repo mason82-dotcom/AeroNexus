@@ -1,0 +1,171 @@
+# AeroNexus Edge - local / Raspberry Pi installation of the AeroNexus stack
+# Run ./setup.sh first (clones + patches upstream, renders secrets), then: docker compose up -d --build
+name: aeronexus-edge
+
+x-restart: &restart
+  restart: unless-stopped
+
+services:
+  mysql:
+    <<: *restart
+    image: mysql:8.0.39
+    command: ["--character-set-server=utf8mb4", "--collation-server=utf8mb4_general_ci"]
+    environment:
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD}
+      TZ: Europe/Berlin
+    volumes:
+      - ./data/mysql:/var/lib/mysql
+      - ./runtime/initdb:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "mysqladmin ping -h 127.0.0.1 -uroot -p$$MYSQL_ROOT_PASSWORD --silent"]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+
+  redis:
+    <<: *restart
+    image: redis:7.2.5
+    command: ["redis-server", "--requirepass", "${REDIS_PASSWORD}", "--appendonly", "yes"]
+    volumes:
+      - ./data/redis:/data
+    healthcheck:
+      test: ["CMD-SHELL", "redis-cli -a $$REDIS_PASSWORD ping | grep PONG"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    environment:
+      REDIS_PASSWORD: ${REDIS_PASSWORD}
+
+  emqx:
+    <<: *restart
+    image: emqx/emqx:5.8.6
+    environment:
+      EMQX_NODE__NAME: emqx@127.0.0.1
+      EMQX_DASHBOARD__DEFAULT_PASSWORD: ${EMQX_DASHBOARD_PASSWORD}
+      # built-in user database, seeded from emqx/auth-bootstrap.csv (rendered by setup.sh)
+      EMQX_AUTHENTICATION__1__MECHANISM: password_based
+      EMQX_AUTHENTICATION__1__BACKEND: built_in_database
+      EMQX_AUTHENTICATION__1__USER_ID_TYPE: username
+      EMQX_AUTHENTICATION__1__BOOTSTRAP_FILE: /opt/emqx/etc/auth-bootstrap.csv
+      EMQX_AUTHENTICATION__1__BOOTSTRAP_TYPE: plain
+    volumes:
+      - ./runtime/emqx/auth-bootstrap.csv:/opt/emqx/etc/auth-bootstrap.csv:ro
+      - ./data/emqx:/opt/emqx/data
+    ports:
+      - "1883:1883"     # MQTT (Pilot 2 + backend)
+      - "8083:8083"     # MQTT over WebSocket (DRC)
+      - "18083:18083"   # EMQX dashboard
+    healthcheck:
+      test: ["CMD", "/opt/emqx/bin/emqx", "ctl", "status"]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+
+  minio:
+    <<: *restart
+    # MinIO CE images are frozen (no more upstream builds). LAN use only, see README.
+    image: quay.io/minio/minio:RELEASE.2025-06-13T11-33-47Z
+    command: ["server", "/data", "--console-address", ":9001"]
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD}
+    volumes:
+      - ./data/minio:/data
+    ports:
+      - "9000:9000"     # S3 API (Pilot 2 uploads directly here)
+      - "9001:9001"     # MinIO console
+
+  minio-init:
+    image: quay.io/minio/minio:RELEASE.2025-06-13T11-33-47Z   # bundles mc
+    entrypoint: ["/bin/sh", "/init/minio-init.sh"]
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD}
+      MINIO_STS_USER: ${MINIO_STS_USER}
+      MINIO_STS_PASSWORD: ${MINIO_STS_PASSWORD}
+      MINIO_BUCKET: ${MINIO_BUCKET}
+    volumes:
+      - ../evidence/scripts/minio-init.sh:/init/minio-init.sh:ro
+    depends_on:
+      - minio
+    restart: "no"
+
+  mediamtx:
+    <<: *restart
+    image: bluenviron/mediamtx:1.15.1
+    # host network: WebRTC ICE candidates then carry the real LAN IP
+    network_mode: host
+    volumes:
+      - ../telemetry/mediamtx/mediamtx.yml:/mediamtx.yml:ro
+
+  api:
+    <<: *restart
+    build:
+      context: ./runtime/upstream/backend
+    image: aeronexus/api:local
+    environment:
+      SERVER_HOST: ${SERVER_HOST}
+      # LAN defaults; TLS mode overrides these in docker-compose.override.yml (rendered by setup.sh)
+      MQTT_PROTOCOL: MQTT
+      MQTT_HOST: ${SERVER_HOST}
+      MQTT_PORT: "1883"
+      MQTT_PATH: ""
+      DRC_PROTOCOL: WS
+      DRC_HOST: ${SERVER_HOST}
+      DRC_PORT: "8083"
+      OSS_ENDPOINT: http://${SERVER_HOST}:9000
+      WHIP_URL: http://${SERVER_HOST}:8889/live/{stream}/whip
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD}
+      REDIS_PASSWORD: ${REDIS_PASSWORD}
+      JWT_SECRET: ${JWT_SECRET}
+      MQTT_SERVER_USER: ${MQTT_SERVER_USER}
+      MQTT_SERVER_PASSWORD: ${MQTT_SERVER_PASSWORD}
+      MINIO_STS_USER: ${MINIO_STS_USER}
+      MINIO_STS_PASSWORD: ${MINIO_STS_PASSWORD}
+      MINIO_BUCKET: ${MINIO_BUCKET}
+      DJI_APP_ID: ${DJI_APP_ID}
+      DJI_APP_KEY: ${DJI_APP_KEY}
+      DJI_APP_LICENSE: ${DJI_APP_LICENSE}
+      RTSP_USER: ${RTSP_USER}
+      RTSP_PASSWORD: ${RTSP_PASSWORD}
+      NTP_SERVER: ${NTP_SERVER}
+      LOG_LEVEL: ${LOG_LEVEL}
+      TZ: Europe/Berlin
+    volumes:
+      - ../api/docker/application.yml:/app/config/application.yml:ro
+      - ./logs:/app/logs
+    ports:
+      - "6789:6789"     # HTTP API + WebSocket (/api/v1/ws)
+    depends_on:
+      mysql:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      emqx:
+        condition: service_healthy
+      minio-init:
+        condition: service_completed_successfully
+
+  control:
+    <<: *restart
+    build:
+      context: ./runtime/upstream/web
+      args:
+        VITE_DJI_APP_ID: ${DJI_APP_ID}
+        VITE_DJI_APP_KEY: ${DJI_APP_KEY}
+        VITE_DJI_APP_LICENSE: ${DJI_APP_LICENSE}
+        VITE_BASE_URL: http://${SERVER_HOST}:6789/
+        VITE_WS_URL: ws://${SERVER_HOST}:6789/api/v1/ws
+        VITE_RTMP_URL: rtmp://${SERVER_HOST}:1935/live/
+        VITE_WHEP_BASE: http://${SERVER_HOST}:8889/
+        VITE_HLS_BASE: http://${SERVER_HOST}:8888/
+        VITE_RTSP_USER: ${RTSP_USER}
+        VITE_RTSP_PASSWORD: ${RTSP_PASSWORD}
+        VITE_MAP_CENTER: ${MAP_CENTER}
+        VITE_MAP_ZOOM: ${MAP_ZOOM}
+        VITE_MAP_TILE_URL: ${MAP_TILE_URL}
+    image: aeronexus/control:local
+    ports:
+      - "8080:80"       # Web UI + Pilot 2 login page (/pilot-login)
+    depends_on:
+      - api
