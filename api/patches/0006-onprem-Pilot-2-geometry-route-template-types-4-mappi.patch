@@ -1,0 +1,65 @@
+From 8d62824c606aa7f14ccd98a6ceec38111fb5854a Mon Sep 17 00:00:00 2001
+From: aeronexus <aeronexus@local>
+Date: Thu, 1 Oct 2026 22:34:10 +0200
+Subject: [PATCH] onprem: Pilot 2 geometry route template types (4
+ mappingPrism, 5 mappingCylinder)
+
+Pilot 2 syncs geometry routes with template_types 4/5, which the SDK rejected,
+so the KMZ landed in MinIO but never in the wayline library. Numbers verified
+against the template.kml of the KMZ files Pilot 2 uploaded with them.
+Upload callbacks are now logged (name, object key, types, drone).
+---
+ .../com/dji/sdk/cloudapi/wayline/WaylineTypeEnum.java     | 8 +++++++-
+ .../sample/wayline/controller/WaylineFileController.java  | 4 ++++
+ 2 files changed, 11 insertions(+), 1 deletion(-)
+
+diff --git a/cloud-sdk/src/main/java/com/dji/sdk/cloudapi/wayline/WaylineTypeEnum.java b/cloud-sdk/src/main/java/com/dji/sdk/cloudapi/wayline/WaylineTypeEnum.java
+index 874963b..22f7a5c 100644
+--- a/cloud-sdk/src/main/java/com/dji/sdk/cloudapi/wayline/WaylineTypeEnum.java
++++ b/cloud-sdk/src/main/java/com/dji/sdk/cloudapi/wayline/WaylineTypeEnum.java
+@@ -22,7 +22,13 @@ public enum WaylineTypeEnum {
+ 
+     MAPPING_3D(2, "mapping3d"),
+ 
+-    MAPPING_STRIP(3, "mappingStrip");
++    MAPPING_STRIP(3, "mappingStrip"),
++
++    // Pilot 2 geometry routes (structures). Not in the public WPML docs; numbers verified against
++    // the template.kml of KMZ files Pilot 2 synced together with these template_types.
++    MAPPING_PRISM(4, "mappingPrism"),
++
++    MAPPING_CYLINDER(5, "mappingCylinder");
+ 
+     private final int value;
+ 
+diff --git a/sample/src/main/java/com/dji/sample/wayline/controller/WaylineFileController.java b/sample/src/main/java/com/dji/sample/wayline/controller/WaylineFileController.java
+index 7b877f4..7bb98dd 100644
+--- a/sample/src/main/java/com/dji/sample/wayline/controller/WaylineFileController.java
++++ b/sample/src/main/java/com/dji/sample/wayline/controller/WaylineFileController.java
+@@ -1,5 +1,6 @@
+ package com.dji.sample.wayline.controller;
+ 
++import lombok.extern.slf4j.Slf4j;
+ import com.dji.sample.common.model.CustomClaim;
+ import com.dji.sample.wayline.model.dto.WaylineFileDTO;
+ import com.dji.sample.wayline.service.IWaylineFileService;
+@@ -34,6 +35,7 @@ import static com.dji.sample.component.AuthInterceptor.TOKEN_CLAIM;
+  * @version 0.3
+  * @date 2021/12/22
+  */
++@Slf4j
+ @RestController
+ public class WaylineFileController implements IHttpWaylineService {
+ 
+@@ -128,6 +130,8 @@ public class WaylineFileController implements IHttpWaylineService {
+         CustomClaim customClaim = (CustomClaim)req.getAttribute(TOKEN_CLAIM);
+ 
+         WaylineUploadCallbackMetadata metadata = request.getMetadata();
++        log.info("Wayline upload callback: name={}, object_key={}, template_types={}, drone={}",
++                request.getName(), request.getObjectKey(), metadata.getTemplateTypes(), metadata.getDroneModelKey());
+ 
+         WaylineFileDTO file = WaylineFileDTO.builder()
+                 .username(customClaim.getUsername())
+-- 
+2.47.3
+

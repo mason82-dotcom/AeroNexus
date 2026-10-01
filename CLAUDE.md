@@ -37,6 +37,10 @@ New device = DeviceTypeEnum + DeviceEnum (+ GatewayTypeEnum if it is a gateway/R
 - WHIP url uses `{stream}` placeholder (backend patch 0002) because MediaMTX expects `/live/<name>/whip`.
 - MediaMTX does not transcode: the browser must decode what the drone sends (H.264).
 
+## Wayline template types
+0 waypoint, 1 mapping2d, 2 mapping3d, 3 mappingStrip, 4 mappingPrism, 5 mappingCylinder.
+4/5 are not in the public WPML docs; verified 2026-10-01 against KMZ files synced by Pilot 2 (patch api 0006).
+
 ## Build notes
 - Backend: Java 11 target, Spring Boot 2.7.12. Lombok forced to 1.18.36 (`-Dlombok.version`).
   Plugin `spring-boot-maven-plugin` pinned to 2.7.12 in `sample/pom.xml` (repackage).
