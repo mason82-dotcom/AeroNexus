@@ -1,0 +1,29 @@
+From 4f24ff6ef76d4680581be48c43c2560b3c5a6e27 Mon Sep 17 00:00:00 2001
+From: aeronexus <aeronexus@local>
+Date: Thu, 1 Oct 2026 22:07:40 +0200
+Subject: [PATCH] onprem: MouseTool.on ignores duplicate draw handlers (AMap
+ semantics)
+
+GMap calls $mouseTool.on('draw', cb) on every tool selection. The shim pushed
+the handler each time, so one drawing created the element several times.
+---
+ src/vendors/amap-leaflet-shim.ts | 3 ++-
+ 1 file changed, 2 insertions(+), 1 deletion(-)
+
+diff --git a/src/vendors/amap-leaflet-shim.ts b/src/vendors/amap-leaflet-shim.ts
+index d962a13..8cdffcd 100644
+--- a/src/vendors/amap-leaflet-shim.ts
++++ b/src/vendors/amap-leaflet-shim.ts
+@@ -319,7 +319,8 @@ export class MouseTool {
+   polygon (opts: any) { this.start('polygon', opts) }
+   circle (opts: any) { this.start('circle', opts) }
+ 
+-  on (evt: string, cb: Function) { if (evt === 'draw') this.listeners.push(cb) }
++  // AMap ignores re-registering the same handler; callers call on('draw', cb) on every tool switch
++  on (evt: string, cb: Function) { if (evt === 'draw' && !this.listeners.includes(cb)) this.listeners.push(cb) }
+   off (evt: string) { if (evt === 'draw') this.listeners = [] }
+ 
+   close () {
+-- 
+2.47.3
+

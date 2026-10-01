@@ -40,6 +40,7 @@ Bisherige Patches:
 - **control 0002:** Karte AMap ersetzt durch Leaflet/OpenStreetMap
 - **control 0003:** Livestream-Player im Browser (WebRTC/WHEP, HLS-Fallback)
 - **control 0004:** Leaflet-Karte bleibt unter schwebenden Fenstern (Livestream-Fenster war verdeckt)
+- **control 0005:** Zeichenwerkzeug legt Annotationen nur noch einmal an (vorher bei jedem Werkzeugwechsel mehrfach)
 
 ## Schnellstart
 
