@@ -44,20 +44,20 @@ jwt:
 # LAN mode: tcp://SERVER_HOST:1884   TLS mode: wss://HUB_DOMAIN:443/mqtt (via Caddy)
 mqtt:
   BASIC:
-    protocol: ${MQTT_PROTOCOL}
-    host: ${MQTT_HOST}
-    port: ${MQTT_PORT}
-    username: ${MQTT_SERVER_USER}
-    password: ${MQTT_SERVER_PASSWORD}
+    protocol: ${BROKER_PROTOCOL}
+    host: ${BROKER_HOST}
+    port: ${BROKER_PORT}
+    username: ${BROKER_USER}
+    password: ${BROKER_PASSWORD}
     client-id: onprem-backend
-    path: ${MQTT_PATH}
+    path: ${BROKER_PATH}
   DRC:
     protocol: ${DRC_PROTOCOL}
     host: ${DRC_HOST}
     port: ${DRC_PORT}
     path: /mqtt
-    username: ${MQTT_SERVER_USER}
-    password: ${MQTT_SERVER_PASSWORD}
+    username: ${BROKER_USER}
+    password: ${BROKER_PASSWORD}
 
 cloud-sdk:
   mqtt:
@@ -115,11 +115,11 @@ livestream:
       port: 8554
     gb28181:
       serverIP: unused
-      serverPort: unused
+      serverPort: 0         # Integer field, GB28181 unused
       serverID: unused
       agentID: unused
       agentPassword: unused
-      localPort: unused
+      localPort: 0          # Integer field, GB28181 unused
       channel: unused
     whip:
       # {stream} is replaced by <droneSn>-<payloadIndex> (backend patch 0002)

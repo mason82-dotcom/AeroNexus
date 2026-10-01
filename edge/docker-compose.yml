@@ -111,10 +111,11 @@ services:
     environment:
       SERVER_HOST: ${SERVER_HOST}
       # LAN defaults; TLS mode overrides these in docker-compose.override.yml (rendered by setup.sh)
-      MQTT_PROTOCOL: MQTT
-      MQTT_HOST: ${SERVER_HOST}
-      MQTT_PORT: "1884"
-      MQTT_PATH: ""
+      # BROKER_* not MQTT_*: Spring relaxed binding would map MQTT_X onto the mqtt.{BASIC,DRC} map and fail
+      BROKER_PROTOCOL: MQTT
+      BROKER_HOST: ${SERVER_HOST}
+      BROKER_PORT: "1884"
+      BROKER_PATH: ""
       DRC_PROTOCOL: WS
       DRC_HOST: ${SERVER_HOST}
       DRC_PORT: "8084"
@@ -123,8 +124,8 @@ services:
       MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD}
       REDIS_PASSWORD: ${REDIS_PASSWORD}
       JWT_SECRET: ${JWT_SECRET}
-      MQTT_SERVER_USER: ${MQTT_SERVER_USER}
-      MQTT_SERVER_PASSWORD: ${MQTT_SERVER_PASSWORD}
+      BROKER_USER: ${MQTT_SERVER_USER}
+      BROKER_PASSWORD: ${MQTT_SERVER_PASSWORD}
       MINIO_STS_USER: ${MINIO_STS_USER}
       MINIO_STS_PASSWORD: ${MINIO_STS_PASSWORD}
       MINIO_BUCKET: ${MINIO_BUCKET}

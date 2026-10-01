@@ -49,9 +49,13 @@ New device = DeviceTypeEnum + DeviceEnum (+ GatewayTypeEnum if it is a gateway/R
   facade over Leaflet 1.9.4. Callers still use `$aMap` / `$map` / `$mouseTool`. Only the API surface
   the demo uses is implemented; if upstream code calls a new AMap method, add it to the shim.
   Coordinates are WGS84; the demo's GCJ-02 transform is a no-op outside China.
-- MinIO CE images are frozen; LAN only. Phase 2: evaluate STS-capable replacement.
+- MinIO CE: no images/binaries published anymore -> built from pinned source in `evidence/docker/minio`
+  (minio RELEASE.2025-10-15T17-29-55Z, mc RELEASE.2025-08-13T08-35-41Z). No further security fixes;
+  LAN only. Phase 2: evaluate STS-capable replacement.
 - TLS (WIP): `edge/caddy/` holds a validated Caddyfile template + Dockerfile (DNS-01, cloudflare@v0.2.4 /
   duckdns@v0.5.0 build against Caddy 2.10.2). Not yet wired into compose/setup. api/application.yml and
-  compose already take MQTT_*, DRC_*, OSS_ENDPOINT, WHIP_URL from env for that. DJI states only GoDaddy and
-  Cloudflare certs are supported; Pilot 2 MQTT reportedly works with wss:// but not ssl://.
+  compose already take BROKER_*, DRC_*, OSS_ENDPOINT, WHIP_URL from env for that. Never pass MQTT_* env
+  into the api container: Spring relaxed binding maps it onto the mqtt.{BASIC,DRC} map and startup fails.
+  DJI states only GoDaddy and Cloudflare certs are supported; Pilot 2 MQTT reportedly works with wss:// but not ssl://.
 - Compose service names: api (backend), control (web).
+- Host ports on the dev Pi: MQTT 1884, MQTT-WS 8084, web 8085 (1883/8083/8080 taken by other services).

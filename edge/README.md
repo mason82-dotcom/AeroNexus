@@ -66,7 +66,7 @@ Die SQL-Dateien laufen nur beim allerersten Start von MySQL (leeres `data/mysql`
 | 1935 | RTMP-Ingest | Pilot 2 |
 | 8889 / 8888 / 8554 | WebRTC (WHEP/WHIP) / HLS / RTSP | Browser, VLC |
 | 8189/udp | WebRTC-Medien | Browser |
-| 9997 | MediaMTX API | Admin |
+| 9997 | MediaMTX API | Admin (nur vom Server selbst, MediaMTX-Default) |
 | 18083 | EMQX Dashboard | Admin (User `admin`) |
 
 ## Controller verbinden
@@ -108,15 +108,16 @@ Typ **WEBRTC** (WHIP direkt vom Controller zu MediaMTX) ist vorbereitet, aber ex
 das für Mavic 3E/3T/3M und Matrice 4T anbietet, hängt von Firmware und Pilot-Version ab. RTMP ist der Standard.
 
 Weitere Wege zum selben Stream:
-- Liste aktiver Streams: `http://<SERVER_HOST>:9997/v3/paths/list`
+- Liste aktiver Streams (auf dem Server): `curl http://127.0.0.1:9997/v3/paths/list`
 - Eigener Browser-Tab: `http://<SERVER_HOST>:8889/live/<SN>-<Payload>`
 - VLC: `rtsp://<SERVER_HOST>:8554/live/<SN>-<Payload>`
 
 ## Fehlersuche
 
-- **Pilot verbindet MQTT nicht:** In den EMQX-Dashboard-Clients nachsehen. Falls die Bootstrap-Authentifizierung
-  nicht greift, zum Test die fünf `EMQX_AUTHENTICATION__1__*`-Zeilen in `docker-compose.yml` auskommentieren
-  (EMQX läuft dann ohne Anmeldung, nur im vertrauenswürdigen LAN).
+- **Pilot verbindet MQTT nicht:** In den EMQX-Dashboard-Clients nachsehen. Die Bootstrap-Authentifizierung
+  (Benutzer aus `runtime/emqx/auth-bootstrap.csv`) ist getestet: Backend und Pilot kommen rein, anonyme Clients
+  und falsche Passwörter werden abgewiesen. Die Benutzer liegen danach in `data/emqx`. Passwortänderungen in `.env`
+  deshalb auch im Dashboard nachziehen (oder `data/emqx` löschen und neu starten).
 - **RC Plus 2 erscheint nicht, im Log `CloudSDKException ... DeviceEnum`:** Patch nicht angewendet.
   `runtime/upstream/` löschen und `./setup.sh` neu ausführen.
 - **Medien-Upload schlägt fehl:** `minio-init` muss mit Exit 0 enden (`docker compose logs minio-init`);
@@ -128,7 +129,8 @@ Weitere Wege zum selben Stream:
 
 Nur für LAN/VPN gedacht. Alles läuft unverschlüsselt (HTTP, MQTT ohne TLS).
 Für Zugriff über 4G: Reverse-Proxy mit TLS (z. B. Caddy) und WireGuard, MQTT auf 8883 mit TLS.
-MinIO CE bekommt keine Updates mehr; nicht ins Internet exponieren.
+MinIO CE bekommt keine Updates mehr und wird nicht mehr als Image verteilt; AeroNexus baut es aus dem
+gepinnten Quellcode (`evidence/docker/minio`). Nicht ins Internet exponieren.
 
 ## Phase 2
 
