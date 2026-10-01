@@ -1,0 +1,31 @@
+From ee0b8f6c93b1387fe1a74921f0a48aea3b119e56 Mon Sep 17 00:00:00 2001
+From: aeronexus <aeronexus@local>
+Date: Thu, 1 Oct 2026 22:45:24 +0200
+Subject: [PATCH] onprem: media upload callback without created_time (Mavic 3M
+ TIF bands)
+
+Pilot 2 sends no metadata.created_time for the M3M multispectral TIF bands.
+The @NotNull check rejected the callback, Pilot retried every few seconds and
+the files stayed in MinIO without a media library entry. The sample never
+stored this field, so the check is dropped.
+---
+ .../main/java/com/dji/sdk/cloudapi/media/MediaFileMetadata.java | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/cloud-sdk/src/main/java/com/dji/sdk/cloudapi/media/MediaFileMetadata.java b/cloud-sdk/src/main/java/com/dji/sdk/cloudapi/media/MediaFileMetadata.java
+index 5a5a17b..e37cbad 100644
+--- a/cloud-sdk/src/main/java/com/dji/sdk/cloudapi/media/MediaFileMetadata.java
++++ b/cloud-sdk/src/main/java/com/dji/sdk/cloudapi/media/MediaFileMetadata.java
+@@ -21,8 +21,8 @@ public class MediaFileMetadata {
+     @Schema(description = "absolute height", example = "-36.889")
+     private Double absoluteAltitude;
+ 
++    // Not sent by Pilot 2 for the Mavic 3M multispectral TIF bands; the sample does not store it.
+     @JsonFormat(pattern = "yyyy-MM-dd'T'HH:mm:ssVV")
+-    @NotNull
+     @Schema(description = "media create time", example = "2023-01-01T20:00:00+08:00")
+     @JsonProperty("created_time")
+     private LocalDateTime createdTime;
+-- 
+2.47.3
+
