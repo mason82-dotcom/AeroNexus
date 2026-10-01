@@ -1,0 +1,137 @@
+From c5bb486e911380396e9145adcf641344ac3d6354 Mon Sep 17 00:00:00 2001
+From: aeronexus <aeronexus@local>
+Date: Thu, 1 Oct 2026 21:51:33 +0200
+Subject: [PATCH] onprem: tolerate unknown RC state keys, M3M rgb video type,
+ dedupe video list
+
+- StateRouter: drop state messages with keys the SDK does not model
+  (wpmz_version, is_cloud_control_auth, camera_watermark_settings, ...)
+  with one WARN per key instead of failing the integration flow
+- VideoTypeEnum: rgb (Mavic 3M RGB camera)
+- live capacity: M3M sends 5 identical multi-spectral-0 entries, keep one
+---
+ .../cloudapi/livestream/VideoTypeEnum.java    |  4 ++-
+ .../com/dji/sdk/mqtt/state/StateRouter.java   | 27 +++++++++++++++++++
+ .../impl/CapacityCameraServiceImpl.java       | 11 ++++++++
+ 3 files changed, 41 insertions(+), 1 deletion(-)
+
+diff --git a/cloud-sdk/src/main/java/com/dji/sdk/cloudapi/livestream/VideoTypeEnum.java b/cloud-sdk/src/main/java/com/dji/sdk/cloudapi/livestream/VideoTypeEnum.java
+index 9c40971..084fe7d 100644
+--- a/cloud-sdk/src/main/java/com/dji/sdk/cloudapi/livestream/VideoTypeEnum.java
++++ b/cloud-sdk/src/main/java/com/dji/sdk/cloudapi/livestream/VideoTypeEnum.java
+@@ -23,7 +23,9 @@ public enum VideoTypeEnum {
+ 
+     IR("ir"),
+ 
+-    /** Mavic 3M multispectral camera */
++    /** Mavic 3M cameras */
++    RGB("rgb"),
++
+     MULTI_SPECTRAL("multi-spectral");
+ 
+     private final String type;
+diff --git a/cloud-sdk/src/main/java/com/dji/sdk/mqtt/state/StateRouter.java b/cloud-sdk/src/main/java/com/dji/sdk/mqtt/state/StateRouter.java
+index f431fe7..dde30be 100644
+--- a/cloud-sdk/src/main/java/com/dji/sdk/mqtt/state/StateRouter.java
++++ b/cloud-sdk/src/main/java/com/dji/sdk/mqtt/state/StateRouter.java
+@@ -7,6 +7,8 @@ import com.dji.sdk.exception.CloudSDKException;
+ import com.dji.sdk.mqtt.ChannelName;
+ import com.dji.sdk.mqtt.MqttGatewayPublish;
+ import com.fasterxml.jackson.core.type.TypeReference;
++import org.slf4j.Logger;
++import org.slf4j.LoggerFactory;
+ import org.springframework.context.annotation.Bean;
+ import org.springframework.context.annotation.Configuration;
+ import org.springframework.integration.dsl.IntegrationFlow;
+@@ -21,6 +23,7 @@ import java.util.Arrays;
+ import java.util.Map;
+ import java.util.Objects;
+ import java.util.Set;
++import java.util.concurrent.ConcurrentHashMap;
+ 
+ import static com.dji.sdk.mqtt.TopicConst.*;
+ 
+@@ -33,6 +36,10 @@ import static com.dji.sdk.mqtt.TopicConst.*;
+ @Configuration
+ public class StateRouter {
+ 
++    private static final Logger log = LoggerFactory.getLogger(StateRouter.class);
++
++    private static final Set<String> IGNORED_STATE_KEYS = ConcurrentHashMap.newKeySet();
++
+     @Resource
+     private MqttGatewayPublish gatewayPublish;
+ 
+@@ -40,6 +47,7 @@ public class StateRouter {
+     public IntegrationFlow stateDataRouterFlow() {
+         return IntegrationFlows
+                 .from(ChannelName.INBOUND_STATE)
++                .filter(Message.class, this::isKnownState)
+                 .transform(Message.class, source -> {
+                     try {
+                         TopicStateRequest response = Common.getObjectMapper().readValue((byte[]) source.getPayload(), new TypeReference<TopicStateRequest>() {});
+@@ -75,6 +83,25 @@ public class StateRouter {
+     }
+ 
+ 
++    /**
++     * Newer Pilot 2 / RC firmware reports state keys this SDK does not model yet
++     * (e.g. wpmz_version, is_cloud_control_auth, camera_watermark_settings).
++     * Drop them with one warning per key instead of failing the whole flow.
++     */
++    private boolean isKnownState(Message<?> source) {
++        try {
++            TopicStateRequest request = Common.getObjectMapper().readValue((byte[]) source.getPayload(), new TypeReference<TopicStateRequest>() {});
++            getTypeReference(request.getGateway(), request.getData());
++            return true;
++        } catch (CloudSDKException | IOException e) {
++            String key = e.getMessage();
++            if (IGNORED_STATE_KEYS.add(key)) {
++                log.warn("Ignoring unsupported state data: {} (topic {})", key, source.getHeaders().get(MqttHeaders.RECEIVED_TOPIC));
++            }
++            return false;
++        }
++    }
++
+     private Class getTypeReference(String gatewaySn, Object data) {
+         Set<String> keys = ((Map<String, Object>) data).keySet();
+         switch (SDKManager.getDeviceSDK(gatewaySn).getType()) {
+diff --git a/sample/src/main/java/com/dji/sample/manage/service/impl/CapacityCameraServiceImpl.java b/sample/src/main/java/com/dji/sample/manage/service/impl/CapacityCameraServiceImpl.java
+index 3f0b2da..e00e56f 100644
+--- a/sample/src/main/java/com/dji/sample/manage/service/impl/CapacityCameraServiceImpl.java
++++ b/sample/src/main/java/com/dji/sample/manage/service/impl/CapacityCameraServiceImpl.java
+@@ -17,6 +17,10 @@ import java.util.List;
+ import java.util.Objects;
+ import java.util.Optional;
+ import java.util.UUID;
++import java.util.HashSet;
++import java.util.Set;
++import java.util.function.Function;
++import java.util.function.Predicate;
+ import java.util.stream.Collectors;
+ 
+ /**
+@@ -50,6 +54,11 @@ public class CapacityCameraServiceImpl implements ICapacityCameraService {
+         RedisOpsUtils.hashSet(RedisConst.LIVE_CAPACITY, deviceSn, capacity);
+     }
+ 
++    private static <T> Predicate<T> distinctBy(Function<T, Object> key) {
++        Set<Object> seen = new HashSet<>();
++        return t -> seen.add(key.apply(t));
++    }
++
+     public CapacityCameraDTO receiver2Dto(CapacityCameraReceiver receiver) {
+         CapacityCameraDTO.CapacityCameraDTOBuilder builder = CapacityCameraDTO.builder();
+         if (receiver == null) {
+@@ -66,6 +75,8 @@ public class CapacityCameraServiceImpl implements ICapacityCameraService {
+                 .id(UUID.randomUUID().toString())
+                 .videosList(receiver.getVideoList()
+                         .stream()
++                        // M3M reports its multispectral bands as identical "multi-spectral-0" entries
++                        .filter(distinctBy(video -> String.valueOf(video.getVideoIndex())))
+                         .map(cameraVideoService::receiver2Dto)
+                         .filter(Objects::nonNull)
+                         .collect(Collectors.toList()))
+-- 
+2.47.3
+

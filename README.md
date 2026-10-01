@@ -34,6 +34,7 @@ Bisherige Patches:
 - **api 0001:** Matrice 4E/4T, M4-Kameras, RC Plus 2 als Gateway, ausführbares Jar
 - **api 0002:** WHIP-URL mit `{stream}`-Platzhalter für MediaMTX
 - **api 0003:** Mavic 3M Multispektral-Videotyp und `dongle_infos` vom RC (sonst verworfene Statusmeldungen)
+- **api 0004:** unbekannte RC-Status-Keys werden ignoriert statt Fehler, M3M `rgb`, doppelte Videoeinträge entfernt
 - **control 0001:** Mavic 3M, Matrice 4, RC Pro/RC Plus 2 in der Oberfläche, Konfiguration über Env
 - **control 0002:** Karte AMap ersetzt durch Leaflet/OpenStreetMap
 - **control 0003:** Livestream-Player im Browser (WebRTC/WHEP, HLS-Fallback)
