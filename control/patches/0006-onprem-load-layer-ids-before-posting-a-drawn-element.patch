@@ -1,0 +1,70 @@
+From 3634f52005e80f0fe150a1a87d8e756cfc11303c Mon Sep 17 00:00:00 2001
+From: aeronexus <aeronexus@local>
+Date: Thu, 1 Oct 2026 22:14:17 +0200
+Subject: [PATCH] onprem: load layer ids before posting a drawn element
+
+The share layer id was only set after visiting the Annotations page. Drawing
+from another page (e.g. /tsa) stored the element in group 'undefined', where
+neither the web nor Pilot 2 shows it.
+---
+ src/components/GMap.vue | 17 +++++++++++++----
+ 1 file changed, 13 insertions(+), 4 deletions(-)
+
+diff --git a/src/components/GMap.vue b/src/components/GMap.vue
+index 23755a4..9418b79 100644
+--- a/src/components/GMap.vue
++++ b/src/components/GMap.vue
+@@ -434,7 +434,7 @@ import {
+   generatePointContent,
+   generatePolyContent
+ } from '../utils/map-layer-utils'
+-import { postElementsReq } from '/@/api/layer'
++import { getElementGroupsReq, postElementsReq } from '/@/api/layer'
+ import { MapDoodleType, MapElementEnum } from '/@/constants/map'
+ import { useGMapManage } from '/@/hooks/use-g-map'
+ import { useGMapCover } from '/@/hooks/use-g-map-cover'
+@@ -735,13 +735,22 @@ export default defineComponent({
+           break
+       }
+     }
++    // layerBaseInfo is only filled by the Annotations page; drawing from another page (e.g. /tsa)
++    // posted to group "undefined". Load the layer ids on demand.
++    async function ensureShareId () {
++      if (!shareId.value) {
++        const result = await getElementGroupsReq({ groupId: '', isDistributed: true })
++        await store.dispatch('setLayerInfo', result.data || [])
++      }
++      return shareId.value
++    }
+     async function postPinPositionResource (obj) {
+       const req = getPinPositionResource(obj)
+       setLayers(req)
+       const coordinates = req.resource.content.geometry.coordinates
+       updateCoordinates('gcj02-wgs84', req);
+       (req.resource.content.geometry.coordinates as GeojsonCoordinate).push((coordinates as GeojsonCoordinate)[2])
+-      const result = await postElementsReq(shareId.value, req)
++      const result = await postElementsReq(await ensureShareId(), req)
+       obj.setExtData({ id: req.id, name: req.name })
+       store.state.coverMap[req.id] = [obj]
+     }
+@@ -749,7 +758,7 @@ export default defineComponent({
+       const req = getPolylineResource(obj)
+       setLayers(req)
+       updateCoordinates('gcj02-wgs84', req)
+-      const result = await postElementsReq(shareId.value, req)
++      const result = await postElementsReq(await ensureShareId(), req)
+       obj.setExtData({ id: req.id, name: req.name })
+       store.state.coverMap[req.id] = [obj]
+     }
+@@ -757,7 +766,7 @@ export default defineComponent({
+       const req = getPoygonResource(obj)
+       setLayers(req)
+       updateCoordinates('gcj02-wgs84', req)
+-      const result = await postElementsReq(shareId.value, req)
++      const result = await postElementsReq(await ensureShareId(), req)
+       obj.setExtData({ id: req.id, name: req.name })
+       store.state.coverMap[req.id] = [obj]
+     }
+-- 
+2.47.3
+

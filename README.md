@@ -41,6 +41,7 @@ Bisherige Patches:
 - **control 0003:** Livestream-Player im Browser (WebRTC/WHEP, HLS-Fallback)
 - **control 0004:** Leaflet-Karte bleibt unter schwebenden Fenstern (Livestream-Fenster war verdeckt)
 - **control 0005:** Zeichenwerkzeug legt Annotationen nur noch einmal an (vorher bei jedem Werkzeugwechsel mehrfach)
+- **control 0006:** Annotationen landen auch beim Zeichnen ausserhalb der Annotations-Seite in der richtigen Ebene
 
 ## Schnellstart
 
