@@ -2,6 +2,14 @@
 # All ${...} values come from .env via docker-compose "environment".
 server:
   port: 6789
+  # HTTP access log (who called which endpoint, status) -> edge/logs/access_log.<date>.log
+  tomcat:
+    basedir: /tmp/tomcat
+    accesslog:
+      enabled: true
+      directory: /app/logs
+      buffered: false
+      pattern: '%t %a "%r" %s %b %Dms'
 
 spring:
   main:
