@@ -1,0 +1,31 @@
+From 0d4304a95873b994a8ecc2175006e5be0c7b3c51 Mon Sep 17 00:00:00 2001
+From: aeronexus <aeronexus@local>
+Date: Thu, 1 Oct 2026 21:59:08 +0200
+Subject: [PATCH] onprem: handle RC live_status state instead of throwing
+
+The sample did not implement rcLiveStatusUpdate, so every live_status message
+from Pilot 2 during a stream logged an UnsupportedOperationException.
+---
+ .../dji/sample/manage/service/impl/SDKDeviceService.java    | 6 ++++++
+ 1 file changed, 6 insertions(+)
+
+diff --git a/sample/src/main/java/com/dji/sample/manage/service/impl/SDKDeviceService.java b/sample/src/main/java/com/dji/sample/manage/service/impl/SDKDeviceService.java
+index 81b2804..bd50679 100644
+--- a/sample/src/main/java/com/dji/sample/manage/service/impl/SDKDeviceService.java
++++ b/sample/src/main/java/com/dji/sample/manage/service/impl/SDKDeviceService.java
+@@ -159,6 +159,12 @@ public class SDKDeviceService extends AbstractDeviceService {
+         deviceService.pushOsdDataToWeb(device.getWorkspaceId(), BizCodeEnum.DOCK_OSD, from, request.getData());
+     }
+ 
++    @Override
++    public void rcLiveStatusUpdate(TopicStateRequest<RcLiveStatus> request, MessageHeaders headers) {
++        // RC reports the state of its running streams; the web polls MediaMTX instead, so only logged.
++        log.debug("{} live status: {}", request.getFrom(), request.getData());
++    }
++
+     @Override
+     public TopicStateResponse<MqttReply> dongleInfos(TopicStateRequest<DongleInfos> request, MessageHeaders headers) {
+         // 4G dongle state (Dock 2, RC). Not used by the web UI yet, so only logged.
+-- 
+2.47.3
+
