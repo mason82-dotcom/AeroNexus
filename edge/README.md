@@ -23,10 +23,10 @@ Nicht möglich mit RC: Missionen aus der Cloud starten. Das geht nur mit Dock.
 ```
 DJI Pilot 2 (RC)
   |-- HTTPS/HTTP :6789  --> api (Spring Boot, gepatchtes DJI-Demo)
-  |-- MQTT :1883        --> EMQX  <--> api
+  |-- MQTT :1884        --> EMQX  <--> api
   |-- S3 :9000          --> MinIO (STS-Uploads direkt vom Controller)
   |-- RTMP :1935        --> MediaMTX --> WebRTC :8889 / HLS :8888 / RTSP :8554
-  `-- WebView :8080     --> control (Vue, Login-Seite /pilot-login)
+  `-- WebView :8085     --> control (Vue, Login-Seite /pilot-login)
 api --> MySQL, Redis
 ```
 
@@ -59,9 +59,9 @@ Die SQL-Dateien laufen nur beim allerersten Start von MySQL (leeres `data/mysql`
 
 | Port | Dienst | Wer greift zu |
 |---|---|---|
-| 8080 | Web-UI + Pilot-Login | Browser, Pilot 2 |
+| 8085 | Web-UI + Pilot-Login | Browser, Pilot 2 |
 | 6789 | Backend API + WebSocket | Browser, Pilot 2 |
-| 1883 / 8083 | MQTT / MQTT über WS | Pilot 2, Backend |
+| 1884 / 8084 | MQTT / MQTT über WS | Pilot 2, Backend |
 | 9000 / 9001 | MinIO S3 / Konsole | Pilot 2 (Uploads) / Admin |
 | 1935 | RTMP-Ingest | Pilot 2 |
 | 8889 / 8888 / 8554 | WebRTC (WHEP/WHIP) / HLS / RTSP | Browser, VLC |
@@ -74,10 +74,10 @@ Die SQL-Dateien laufen nur beim allerersten Start von MySQL (leeres `data/mysql`
 1. Controller ins Netz bringen, in dem `SERVER_HOST` erreichbar ist.
 2. Pilot 2 öffnen, auf der Startseite **Cloud Services** wählen und dort die Drittanbieter-Plattform
    (**Open Platform**) auswählen.
-3. URL eingeben: `http://<SERVER_HOST>:8080/pilot-login`
+3. URL eingeben: `http://<SERVER_HOST>:8085/pilot-login`
 4. Mit `pilot` und `PILOT_LOGIN_PASSWORD` anmelden. Die Seite prüft die DJI-License per JSBridge
    und verbindet danach automatisch MQTT, API, Karte, Medien, Wegpunkte und Livestream.
-5. Im Browser `http://<SERVER_HOST>:8080` mit `adminPC` öffnen. Der Controller samt Fluggerät
+5. Im Browser `http://<SERVER_HOST>:8085` mit `adminPC` öffnen. Der Controller samt Fluggerät
    sollte unter Geräte bzw. im Lagebild erscheinen.
 
 ## Karte

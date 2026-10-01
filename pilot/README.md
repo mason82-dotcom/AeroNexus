@@ -1,7 +1,7 @@
 # AeroNexus Pilot
 
 Anbindung der Fernsteuerungen über **DJI Pilot 2** (Cloud Services → Open Platform).
-Pilot 2 lädt `http://<server>:8080/pilot-login`, prüft die DJI-Lizenz per JSBridge und verbindet
+Pilot 2 lädt `http://<server>:8085/pilot-login`, prüft die DJI-Lizenz per JSBridge und verbindet
 MQTT, API, Karte, Medien, Wegpunkte und Livestream.
 
 | Fernsteuerung | Gerätecode | Fluggeräte |

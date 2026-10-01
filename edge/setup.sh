@@ -61,6 +61,6 @@ cat <<MSG
 
 Setup done. Next:
   docker compose up -d --build
-  Web UI:            http://${SERVER_HOST}:8080          (login: adminPC)
-  Pilot 2 login URL: http://${SERVER_HOST}:8080/pilot-login (login: pilot)
+  Web UI:            http://${SERVER_HOST}:8085          (login: adminPC)
+  Pilot 2 login URL: http://${SERVER_HOST}:8085/pilot-login (login: pilot)
 MSG

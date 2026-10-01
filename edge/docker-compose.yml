@@ -52,8 +52,8 @@ services:
       - ./runtime/emqx/auth-bootstrap.csv:/opt/emqx/etc/auth-bootstrap.csv:ro
       - ./data/emqx:/opt/emqx/data
     ports:
-      - "1883:1883"     # MQTT (Pilot 2 + backend)
-      - "8083:8083"     # MQTT over WebSocket (DRC)
+      - "1884:1883"     # MQTT (Pilot 2 + backend); host 1883 taken by mosquitto
+      - "8084:8083"     # MQTT over WebSocket (DRC); host 8083 taken by calibre-web
       - "18083:18083"   # EMQX dashboard
     healthcheck:
       test: ["CMD", "/opt/emqx/bin/emqx", "ctl", "status"]
@@ -108,11 +108,11 @@ services:
       # LAN defaults; TLS mode overrides these in docker-compose.override.yml (rendered by setup.sh)
       MQTT_PROTOCOL: MQTT
       MQTT_HOST: ${SERVER_HOST}
-      MQTT_PORT: "1883"
+      MQTT_PORT: "1884"
       MQTT_PATH: ""
       DRC_PROTOCOL: WS
       DRC_HOST: ${SERVER_HOST}
-      DRC_PORT: "8083"
+      DRC_PORT: "8084"
       OSS_ENDPOINT: http://${SERVER_HOST}:9000
       WHIP_URL: http://${SERVER_HOST}:8889/live/{stream}/whip
       MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD}
@@ -166,6 +166,6 @@ services:
         VITE_MAP_TILE_URL: ${MAP_TILE_URL}
     image: aeronexus/control:local
     ports:
-      - "8080:80"       # Web UI + Pilot 2 login page (/pilot-login)
+      - "8085:80"       # Web UI + Pilot 2 login page (/pilot-login); host 8080 taken by nextcloud-aio
     depends_on:
       - api

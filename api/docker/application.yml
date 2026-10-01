@@ -41,7 +41,7 @@ jwt:
   age: 86400
 
 # BASIC address is handed to DJI Pilot 2 unchanged AND used by the backend itself.
-# LAN mode: tcp://SERVER_HOST:1883   TLS mode: wss://HUB_DOMAIN:443/mqtt (via Caddy)
+# LAN mode: tcp://SERVER_HOST:1884   TLS mode: wss://HUB_DOMAIN:443/mqtt (via Caddy)
 mqtt:
   BASIC:
     protocol: ${MQTT_PROTOCOL}
