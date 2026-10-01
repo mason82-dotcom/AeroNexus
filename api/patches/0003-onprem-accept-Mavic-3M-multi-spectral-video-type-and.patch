@@ -1,0 +1,105 @@
+From f2430bbabab11b15c18d3da88db19d9e8f41fd6b Mon Sep 17 00:00:00 2001
+From: aeronexus <aeronexus@local>
+Date: Thu, 1 Oct 2026 21:40:14 +0200
+Subject: [PATCH] onprem: accept Mavic 3M multi-spectral video type and RC
+ dongle_infos state
+
+- VideoTypeEnum: add multi-spectral (M3M camera live capacity)
+- VideoId: split '<type>-<index>' at the last '-' (multi-spectral-0)
+- RcStateDataKeyEnum: dongle_infos (RC sends it, empty without 4G dongle)
+- dongleInfos handler allowed for RC, sample logs it instead of throwing
+---
+ .../main/java/com/dji/sdk/cloudapi/device/VideoId.java    | 4 +++-
+ .../sdk/cloudapi/device/api/AbstractDeviceService.java    | 2 +-
+ .../com/dji/sdk/cloudapi/livestream/VideoTypeEnum.java    | 5 ++++-
+ .../java/com/dji/sdk/mqtt/state/RcStateDataKeyEnum.java   | 3 +++
+ .../dji/sample/manage/service/impl/SDKDeviceService.java  | 8 ++++++++
+ 5 files changed, 19 insertions(+), 3 deletions(-)
+
+diff --git a/cloud-sdk/src/main/java/com/dji/sdk/cloudapi/device/VideoId.java b/cloud-sdk/src/main/java/com/dji/sdk/cloudapi/device/VideoId.java
+index a61b77b..03a28cb 100644
+--- a/cloud-sdk/src/main/java/com/dji/sdk/cloudapi/device/VideoId.java
++++ b/cloud-sdk/src/main/java/com/dji/sdk/cloudapi/device/VideoId.java
+@@ -41,7 +41,9 @@ public class VideoId {
+         }
+         this.droneSn = videoIdArr[0];
+         this.payloadIndex = new PayloadIndex(videoIdArr[1]);
+-        this.videoType = VideoTypeEnum.find(videoIdArr[2].split("-")[0]);
++        // "<type>-<index>"; the type itself may contain '-' (multi-spectral-0)
++        int idx = videoIdArr[2].lastIndexOf("-");
++        this.videoType = VideoTypeEnum.find(idx > 0 ? videoIdArr[2].substring(0, idx) : videoIdArr[2]);
+     }
+ 
+     @Override
+diff --git a/cloud-sdk/src/main/java/com/dji/sdk/cloudapi/device/api/AbstractDeviceService.java b/cloud-sdk/src/main/java/com/dji/sdk/cloudapi/device/api/AbstractDeviceService.java
+index 08626e2..4db477b 100644
+--- a/cloud-sdk/src/main/java/com/dji/sdk/cloudapi/device/api/AbstractDeviceService.java
++++ b/cloud-sdk/src/main/java/com/dji/sdk/cloudapi/device/api/AbstractDeviceService.java
+@@ -254,7 +254,7 @@ public class AbstractDeviceService {
+      * @param request  data
+      * @param headers  The headers for a {@link Message}.
+      */
+-    @CloudSDKVersion(since = CloudSDKVersionEnum.V1_0_1, include = GatewayTypeEnum.DOCK2)
++    @CloudSDKVersion(since = CloudSDKVersionEnum.V1_0_1, include = {GatewayTypeEnum.DOCK2, GatewayTypeEnum.RC})
+     @ServiceActivator(inputChannel = ChannelName.INBOUND_STATE_DOCK_AND_DRONE_DONGLE_INFOS, outputChannel = ChannelName.OUTBOUND_STATE)
+     public TopicStateResponse<MqttReply> dongleInfos(TopicStateRequest<DongleInfos> request, MessageHeaders headers) {
+         throw new UnsupportedOperationException("dongleInfos not implemented");
+diff --git a/cloud-sdk/src/main/java/com/dji/sdk/cloudapi/livestream/VideoTypeEnum.java b/cloud-sdk/src/main/java/com/dji/sdk/cloudapi/livestream/VideoTypeEnum.java
+index 256a1d1..9c40971 100644
+--- a/cloud-sdk/src/main/java/com/dji/sdk/cloudapi/livestream/VideoTypeEnum.java
++++ b/cloud-sdk/src/main/java/com/dji/sdk/cloudapi/livestream/VideoTypeEnum.java
+@@ -21,7 +21,10 @@ public enum VideoTypeEnum {
+ 
+     NORMAL("normal"),
+ 
+-    IR("ir");
++    IR("ir"),
++
++    /** Mavic 3M multispectral camera */
++    MULTI_SPECTRAL("multi-spectral");
+ 
+     private final String type;
+ 
+diff --git a/cloud-sdk/src/main/java/com/dji/sdk/mqtt/state/RcStateDataKeyEnum.java b/cloud-sdk/src/main/java/com/dji/sdk/mqtt/state/RcStateDataKeyEnum.java
+index bd80c68..8f959bf 100644
+--- a/cloud-sdk/src/main/java/com/dji/sdk/mqtt/state/RcStateDataKeyEnum.java
++++ b/cloud-sdk/src/main/java/com/dji/sdk/mqtt/state/RcStateDataKeyEnum.java
+@@ -24,6 +24,9 @@ public enum RcStateDataKeyEnum {
+ 
+     LIVE_STATUS(Set.of("live_status"), RcLiveStatus.class),
+ 
++    /** RC reports its 4G dongles too (empty list without dongle) */
++    DONGLE_INFOS(Set.of("dongle_infos"), DongleInfos.class),
++
+     PAYLOAD_FIRMWARE(PayloadModelConst.getAllModelWithPosition(), PayloadFirmwareVersion.class),
+     ;
+ 
+diff --git a/sample/src/main/java/com/dji/sample/manage/service/impl/SDKDeviceService.java b/sample/src/main/java/com/dji/sample/manage/service/impl/SDKDeviceService.java
+index c449c9a..81b2804 100644
+--- a/sample/src/main/java/com/dji/sample/manage/service/impl/SDKDeviceService.java
++++ b/sample/src/main/java/com/dji/sample/manage/service/impl/SDKDeviceService.java
+@@ -19,6 +19,7 @@ import com.dji.sdk.common.SDKManager;
+ import com.dji.sdk.mqtt.MqttReply;
+ import com.dji.sdk.mqtt.osd.TopicOsdRequest;
+ import com.dji.sdk.mqtt.state.TopicStateRequest;
++import com.dji.sdk.mqtt.state.TopicStateResponse;
+ import com.dji.sdk.mqtt.status.TopicStatusRequest;
+ import com.dji.sdk.mqtt.status.TopicStatusResponse;
+ import lombok.extern.slf4j.Slf4j;
+@@ -158,6 +159,13 @@ public class SDKDeviceService extends AbstractDeviceService {
+         deviceService.pushOsdDataToWeb(device.getWorkspaceId(), BizCodeEnum.DOCK_OSD, from, request.getData());
+     }
+ 
++    @Override
++    public TopicStateResponse<MqttReply> dongleInfos(TopicStateRequest<DongleInfos> request, MessageHeaders headers) {
++        // 4G dongle state (Dock 2, RC). Not used by the web UI yet, so only logged.
++        log.debug("{} dongle infos: {}", request.getFrom(), request.getData());
++        return null;
++    }
++
+     @Override
+     public void osdDockDrone(TopicOsdRequest<OsdDockDrone> request, MessageHeaders headers) {
+         String from = request.getFrom();
+-- 
+2.47.3
+
