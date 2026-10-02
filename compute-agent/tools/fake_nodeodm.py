@@ -5,7 +5,7 @@ Implements the NodeODM v2 calls the agent uses. 'Processing' takes a few polls; 
 contains the first uploaded image georeferenced as an orthophoto (EPSG:32632, ~0.1 m/px) at the
 given position, plus a float DSM derived from it.
 
-  python3 fake_nodeodm.py --port 3001 --token testtoken --lon 8.5898 --lat 49.1574
+  python3 fake_nodeodm.py --port 3001 --token testtoken --lon 8.5898 --lat 49.1574 [--multispectral]
 """
 import argparse
 import cgi
@@ -21,8 +21,10 @@ from urllib.parse import parse_qs, urlparse
 from osgeo import osr
 
 OPTIONS = ["fast-orthophoto", "feature-quality", "pc-quality", "skip-3dmodel", "dsm", "no-gpu",
+           "radiometric-calibration", "primary-band",
            "orthophoto-resolution"]
 TASKS: dict[str, dict] = {}
+MULTISPECTRAL = False
 WORK = Path(tempfile.mkdtemp(prefix="fake-nodeodm-"))
 
 
@@ -36,6 +38,39 @@ def utm_of(lon: float, lat: float) -> tuple[float, float]:
     return x, y
 
 
+def build_multispectral(path: Path, cx: float, cy: float, w: float, h: float) -> None:
+    """Synthetic 5-band orthophoto like ODM writes it (UInt16 G/R/RE/NIR + alpha): a field whose
+    centre is vital, a stressed strip in the east and bare soil in the south-west corner."""
+    import numpy as np
+    from osgeo import gdal
+    nx, ny = 800, 600
+    y, x = np.mgrid[0:ny, 0:nx].astype("float32")
+    vital = np.clip(1.0 - np.hypot((x - 400) / 400, (y - 300) / 300), 0, 1)       # 1 in the centre
+    vital = np.where((x > 600) & (x < 680), vital * 0.35, vital)                    # stressed strip
+    vital = np.where((x < 150) & (y > 450), 0.0, vital)                             # bare soil
+    noise = np.random.default_rng(42).normal(0, 0.02, (ny, nx)).astype("float32")
+    nir = (0.20 + 0.35 * vital + noise) * 65535
+    red = (0.12 - 0.09 * vital + noise / 2) * 65535
+    green = (0.10 + 0.02 * vital) * 65535
+    rededge = (0.15 + 0.17 * vital) * 65535
+    alpha = (np.hypot((x - 400) / 390, (y - 300) / 290) <= 1).astype("uint16") * 255
+    drv = gdal.GetDriverByName("GTiff")
+    ds = drv.Create(str(path), nx, ny, 5, gdal.GDT_UInt16, ["COMPRESS=DEFLATE", "PHOTOMETRIC=MINISBLACK"])
+    ds.SetGeoTransform([cx - w / 2, w / nx, 0, cy + h / 2, 0, -h / ny])
+    from osgeo import osr
+    srs = osr.SpatialReference()
+    srs.ImportFromEPSG(32632)
+    ds.SetProjection(srs.ExportToWkt())
+    for i, (name, data) in enumerate((("Green", green), ("Red", red), ("RedEdge", rededge), ("NIR", nir)), 1):
+        band = ds.GetRasterBand(i)
+        band.SetDescription(name)
+        band.WriteArray(np.clip(data, 0, 65535).astype("uint16"))
+    a = ds.GetRasterBand(5)
+    a.SetColorInterpretation(gdal.GCI_AlphaBand)
+    a.WriteArray(alpha)
+    ds = None
+
+
 def build_result(task: dict, lon: float, lat: float) -> Path:
     d = WORK / task["uuid"]
     first = sorted(d.glob("img_*"))[0]
@@ -44,6 +79,12 @@ def build_result(task: dict, lon: float, lat: float) -> Path:
     ortho_dir, dem_dir = d / "odm_orthophoto", d / "odm_dem"
     ortho_dir.mkdir(exist_ok=True)
     dem_dir.mkdir(exist_ok=True)
+    if MULTISPECTRAL:
+        build_multispectral(ortho_dir / "odm_orthophoto.tif", cx, cy, w, h)
+        z = d / "all.zip"
+        with zipfile.ZipFile(z, "w") as zf:
+            zf.write(ortho_dir / "odm_orthophoto.tif", "odm_orthophoto/odm_orthophoto.tif")
+        return z
     plain = d / "plain.tif"
     subprocess.run(["gdal_translate", "-q", "-outsize", "800", "600", "-a_srs", "EPSG:32632",
                     "-a_ullr", str(cx - w / 2), str(cy + h / 2), str(cx + w / 2), str(cy - h / 2),
@@ -142,7 +183,9 @@ if __name__ == "__main__":
     ap.add_argument("--token", default="testtoken")
     ap.add_argument("--lon", type=float, default=8.5898)
     ap.add_argument("--lat", type=float, default=49.1574)
+    ap.add_argument("--multispectral", action="store_true", help="return a synthetic Mavic 3M 5-band orthophoto")
     a = ap.parse_args()
+    MULTISPECTRAL = a.multispectral
     srv = ThreadingHTTPServer(("0.0.0.0", a.port), Handler)
     srv.token, srv.lon, srv.lat = a.token, a.lon, a.lat
     print(f"fake NodeODM on :{a.port}", flush=True)

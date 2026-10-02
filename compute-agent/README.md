@@ -67,6 +67,14 @@ Laufende Auftraege und Fortschritt stehen in der Web-UI unter Mapping.
 - Profil "Fast" (fast-orthophoto) braucht deutlich weniger Speicher als "Standard"/"High".
 - Bei Speichermangel bricht ODM ab; der Auftrag wird mit der ODM-Fehlermeldung als FAILED gemeldet.
 
+## Farming Guide (Multispektral)
+
+Auftraege mit Profil "Multispectral" (Mavic-3M-Baender) liefern zusaetzlich NDVI, NDRE und GNDVI als
+Float32-COG und eingefaerbte Layer mit Statistik (relative Werte, siehe `farming-guide/`). Die Definitionen
+kommen aus `farming-guide/indices.json`; deshalb baut das Agent-Image aus dem Repo-Wurzelverzeichnis
+(`compute-agent/agent/Dockerfile.dockerignore` laesst nur die benoetigten Pfade durch).
+Hauptlayer eines Multispektral-Auftrags ist ein Falschfarbenbild NIR-Rot-Gruen.
+
 ## GPU pruefen
 
 Nach einem Auftrag steht im Agent-Log `gpu_sift=True`, wenn ODM die Merkmalsextraktion auf der GPU gerechnet hat.
@@ -74,7 +82,8 @@ Nach einem Auftrag steht im Agent-Log `gpu_sift=True`, wenn ODM die Merkmalsextr
 
 ## Test ohne echte Photogrammetrie
 
-`tools/fake_nodeodm.py` simuliert NodeODM und liefert ein georeferenziertes Testbild als Orthofoto. Damit
+`tools/fake_nodeodm.py` simuliert NodeODM und liefert ein georeferenziertes Testbild als Orthofoto
+(mit `--multispectral` ein synthetisches 5-Band-Orthofoto wie ODM es fuer die Mavic 3M schreibt). Damit
 laesst sich der ganze Ablauf (Auftrag, Download, GDAL, Upload, Layer) auch auf dem Pi pruefen:
 
 ```bash

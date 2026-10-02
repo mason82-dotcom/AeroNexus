@@ -79,8 +79,13 @@ def to_cog(src: Path, dst: Path, target_crs: str, float_data: bool) -> None:
     run(cmd + [str(src), str(dst)], cwd=dst.parent)
 
 
-def build(found: dict[str, Path], out: Path, target_crs: str, zoom_span: int, processes: int) -> dict:
-    """Create COGs, XYZ tiles and manifest.json in 'out'. Returns the manifest."""
+def build(found: dict[str, Path], out: Path, target_crs: str, zoom_span: int, processes: int,
+          definitions: dict | None = None) -> dict:
+    """Create COGs, XYZ tiles and manifest.json in 'out'. Returns the manifest.
+
+    A multispectral orthophoto (Farming Guide) gets a NIR-R-G false colour preview as main tiles and one
+    extra layer per vegetation index (see indices.py)."""
+    from . import indices
     out.mkdir(parents=True, exist_ok=True)
     info = raster_info(found[ORTHO])
     bounds = wgs84_bounds(info)
@@ -98,9 +103,22 @@ def build(found: dict[str, Path], out: Path, target_crs: str, zoom_span: int, pr
         (out / "report.pdf").write_bytes(found[REPORT].read_bytes())
         files.append({"path": "report.pdf", "kind": "report"})
 
+    multispectral = definitions is not None and indices.is_multispectral(found[ORTHO], definitions)
+    tile_source = found[ORTHO]
+    layers: list[dict] = []
+    if multispectral:
+        work = out.parent / "indices"
+        work.mkdir(parents=True, exist_ok=True)
+        bands, alpha = indices.band_map(found[ORTHO], definitions)
+        tile_source = work / "false_color.tif"
+        indices.false_color(found[ORTHO], bands, alpha, tile_source)
+        index_files, layers = indices.build(found[ORTHO], work, out, definitions, target_crs, minzoom, maxzoom,
+                                            processes)
+        files.extend(index_files)
+
     # XYZ (not TMS) web mercator tiles with transparency outside the orthophoto
     run(["gdal2tiles", "--xyz", f"--zoom={minzoom}-{maxzoom}", "--webviewer=none", "--resampling=average",
-         f"--processes={max(1, processes)}", "--tiledriver=PNG", str(found[ORTHO]), str(out / "tiles")], cwd=out)
+         f"--processes={max(1, processes)}", "--tiledriver=PNG", str(tile_source), str(out / "tiles")], cwd=out)
 
     for f in files:
         p = out / f["path"]
@@ -110,7 +128,8 @@ def build(found: dict[str, Path], out: Path, target_crs: str, zoom_span: int, pr
         "bounds_wgs84": bounds,
         "files": files,
         "tiles": {"path": "tiles", "format": "png", "minzoom": minzoom, "maxzoom": maxzoom},
-        "source": {"odm_crs": info.get("coordinateSystem", {}).get("wkt", "")[:120],
+        "layers": layers,
+        "source": {"odm_crs": info.get("coordinateSystem", {}).get("wkt", "")[:120], "multispectral": multispectral,
                    "ground_resolution_m": abs(info["geoTransform"][1])},
     }
     (out / "manifest.json").write_text(json.dumps(manifest, indent=2))

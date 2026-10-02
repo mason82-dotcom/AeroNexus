@@ -4,7 +4,9 @@ FROM ghcr.io/osgeo/gdal:ubuntu-small-3.11.4@sha256:4b94b5e76e8b5616a4d5dc38e6e20
 
 ENV PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1
 WORKDIR /app
-COPY aeronexus_agent ./aeronexus_agent
+# build context is the repository root (index definitions are shared with the Farming Guide module)
+COPY compute-agent/agent/aeronexus_agent ./aeronexus_agent
+COPY farming-guide/indices.json ./indices.json
 RUN useradd --system --uid 10002 --create-home agent && mkdir -p /work && chown agent /work
 USER agent
 CMD ["python3", "-m", "aeronexus_agent.main"]

@@ -11,7 +11,7 @@ import time
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
-from . import config, postprocess
+from . import config, indices, postprocess
 from .clients import CANCELED, COMPLETED, FAILED, LeaseLost, NodeOdmClient, NodeOdmError, PiClient
 from .http import download, put_file
 
@@ -131,7 +131,9 @@ def process(settings: config.Settings, pi: PiClient, odm: NodeOdmClient, claim: 
         hb.set(83, "building COGs and tiles")
         found = postprocess.extract(zip_path, work / "odm")
         out = work / "out"
-        manifest = postprocess.build(found, out, settings.target_crs, settings.tile_min_zoom_span, os.cpu_count() or 2)
+        definitions = indices.load_definitions(settings.indices_file)
+        manifest = postprocess.build(found, out, settings.target_crs, settings.tile_min_zoom_span, os.cpu_count() or 2,
+                                     definitions)
         manifest["files"].append({"path": "manifest.json", "kind": "other"})
         manifest["source"]["gpu_sift"] = gpu_used
         hb.check()

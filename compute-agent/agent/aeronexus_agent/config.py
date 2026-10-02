@@ -29,6 +29,7 @@ class Settings:
     upload_workers: int
     keep_failed: bool
     gpu: bool
+    indices_file: str
 
 
 def load() -> Settings:
@@ -50,4 +51,5 @@ def load() -> Settings:
         upload_workers=int(_env("UPLOAD_WORKERS", "8")),
         keep_failed=_env("KEEP_FAILED", "false").lower() == "true",
         gpu=_env("GPU", "false").lower() == "true",
+        indices_file=_env("INDICES_FILE", "/app/indices.json"),
     )
