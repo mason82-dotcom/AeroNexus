@@ -84,6 +84,8 @@ def build_router(settings: Settings, storage: Storage) -> APIRouter:
             raise HTTPException(status_code=404, detail="job not found")
         cur.execute("SELECT UTC_TIMESTAMP(3) AS now")
         now = cur.fetchone()["now"]
+        if row["status"] == "CANCELED":
+            raise HTTPException(status_code=409, detail="job canceled by user")
         if row["status"] not in ACTIVE or row["agent_id"] != agent_id or row["lease_until"] < now:
             raise HTTPException(status_code=409, detail="job is not leased to this agent")
         return row
@@ -168,6 +170,27 @@ def build_router(settings: Settings, storage: Storage) -> APIRouter:
         with db.transaction(settings) as cur:
             cur.execute("SELECT * FROM map_layer WHERE workspace_id = %s ORDER BY created_at DESC", (user.workspace_id,))
             return [_layer_out(r) for r in cur.fetchall()]
+
+    @router.post("/jobs/{job_id}/cancel")
+    def cancel_job(job_id: str, user: User = Depends(current_user)) -> dict:
+        """QUEUED -> CANCELED at once; CLAIMED/RUNNING -> CANCELED, the agent stops at its next heartbeat (409)."""
+        with db.transaction(settings) as cur:
+            requeue_expired(cur, settings)
+            cur.execute("SELECT status, agent_id FROM mapping_job WHERE id = %s AND workspace_id = %s FOR UPDATE",
+                        (job_id, user.workspace_id))
+            row = cur.fetchone()
+            if not row:
+                raise HTTPException(status_code=404, detail="job not found")
+            if row["status"] not in ("QUEUED", *ACTIVE):
+                raise HTTPException(status_code=409, detail=f"job is already {row['status']}")
+            running = row["status"] in ACTIVE
+            cur.execute(
+                "UPDATE mapping_job SET status = 'CANCELED', lease_until = NULL, finished_at = UTC_TIMESTAMP(3),"
+                " updated_at = UTC_TIMESTAMP(3), message = %s WHERE id = %s",
+                (f"canceled by {user.username}" + (f", {row['agent_id']} stops at its next heartbeat" if running else ""),
+                 job_id))
+        log.info("job %s canceled by %s (was %s)", job_id, user.username, row["status"])
+        return {"status": "CANCELED", "agent_notified_at_next_heartbeat": running}
 
     @router.delete("/jobs/{job_id}")
     def delete_job(job_id: str, user: User = Depends(current_user)) -> dict:

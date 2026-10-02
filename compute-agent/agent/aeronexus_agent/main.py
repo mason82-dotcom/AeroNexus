@@ -31,6 +31,7 @@ class Heartbeat(threading.Thread):
         self.pi, self.job_id, self.interval = pi, job_id, interval
         self.progress, self.message = 0.0, "claimed"
         self.lost = threading.Event()
+        self.reason = ""
         self.stop = threading.Event()
 
     def set(self, progress: float, message: str) -> None:
@@ -39,13 +40,15 @@ class Heartbeat(threading.Thread):
 
     def check(self) -> None:
         if self.lost.is_set():
-            raise JobAborted("lease lost (job re-queued or taken over on the Pi)")
+            raise JobAborted("canceled by user" if "canceled" in self.reason
+                             else "lease lost (job re-queued or taken over on the Pi)")
 
     def run(self) -> None:
         while not self.stop.wait(self.interval):
             try:
                 self.pi.heartbeat(self.job_id, self.progress, self.message)
-            except LeaseLost:
+            except LeaseLost as exc:
+                self.reason = str(exc)
                 self.lost.set()
                 return
             except Exception as exc:          # network hiccup: retry on the next tick

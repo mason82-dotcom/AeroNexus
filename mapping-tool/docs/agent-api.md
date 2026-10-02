@@ -30,6 +30,7 @@ loop alle 15-30 s:
 | `RUNNING` | Agent hat mindestens einen Heartbeat gesendet |
 | `DONE` | `complete` angenommen, Layer angelegt |
 | `FAILED` | `fail` gemeldet oder Lease 3-mal abgelaufen |
+| `CANCELED` | in der Web-UI abgebrochen. Ein laufender Agent bekommt beim naechsten Aufruf `409` mit `detail: "job canceled by user"`, bricht ab und beendet seinen NodeODM-Task |
 
 Lease: Laeuft `lease_until` ab, ohne dass ein Heartbeat kam, setzt der naechste `claim` (von
 irgendeinem Agenten) den Auftrag wieder auf `QUEUED` (`attempts` + 1). Ab `attempts >= 3` wird er
