@@ -8,7 +8,7 @@ RUN pip install --no-cache-dir --root-user-action=ignore -r requirements.txt
 COPY app ./app
 COPY migrations ./migrations
 
-RUN useradd --system --uid 10001 mapping
+RUN useradd --system --uid 10001 mapping && mkdir -p /cache && chown mapping /cache
 USER mapping
 EXPOSE 6790
 CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "6790", "--proxy-headers"]

@@ -1,0 +1,73 @@
+From 27af6d299b5f3c34bafb696a55f1d29b7817bb5f Mon Sep 17 00:00:00 2001
+From: aeronexus <aeronexus@local>
+Date: Fri, 2 Oct 2026 18:06:30 +0200
+Subject: [PATCH] onprem: thumbnails in the media file list
+
+Preview column with thumbnails rendered and cached by the mapping service
+(JPEG incl. thermal R-JPEG, 16-bit multispectral TIF); videos get an icon.
+---
+ src/components/MediaPanel.vue | 28 +++++++++++++++++++++++++++-
+ 1 file changed, 27 insertions(+), 1 deletion(-)
+
+diff --git a/src/components/MediaPanel.vue b/src/components/MediaPanel.vue
+index 6e40bdc..a984add 100644
+--- a/src/components/MediaPanel.vue
++++ b/src/components/MediaPanel.vue
+@@ -10,6 +10,11 @@
+               <span v-else>{{ text }}</span>
+           </a-tooltip>
+         </template>
++        <template #preview="{ record }">
++          <img v-if="hasThumbnail(record.file_name)" class="thumb" loading="lazy" :alt="record.file_name"
++               :src="thumbnailUrl(record.file_id)" />
++          <VideoCameraOutlined v-else-if="/\.(mp4|mov)$/i.test(record.file_name)" class="fz20" />
++        </template>
+         <template #original="{ text }">
+           {{ text }}
+         </template>
+@@ -31,13 +36,27 @@ import { IPage } from '../api/http/type'
+ import { ELocalStorageKey } from '../types/enums'
+ import { downloadFile } from '../utils/common'
+ import { downloadMediaFile, getMediaFiles } from '/@/api/media'
+-import { DownloadOutlined } from '@ant-design/icons-vue'
++import { DownloadOutlined, VideoCameraOutlined } from '@ant-design/icons-vue'
++import { authToken, mappingBase } from '/@/api/mapping'
++
++// onprem: thumbnails are rendered and cached by the mapping service (JPEG incl. thermal, 16-bit TIF)
++function hasThumbnail (fileName: string): boolean {
++  return /\.(jpe?g|tiff?)$/i.test(fileName)
++}
++function thumbnailUrl (fileId: string): string {
++  return `${mappingBase()}/api/mapping/media/${fileId}/thumbnail.jpg?token=${encodeURIComponent(authToken())}`
++}
+ import { message, Pagination } from 'ant-design-vue'
+ 
+ const workspaceId = localStorage.getItem(ELocalStorageKey.WorkspaceId)!
+ const loading = ref(false)
+ 
+ const columns = [
++  {
++    title: 'Preview',
++    width: 120,
++    slots: { customRender: 'preview' }
++  },
+   {
+     title: 'File Name',
+     dataIndex: 'file_name',
+@@ -145,6 +164,13 @@ function downloadMedia (media: MediaFile) {
+ .media-panel-wrapper {
+   width: 100%;
+   padding: 16px;
++  .thumb {
++    width: 96px;
++    height: 72px;
++    object-fit: cover;
++    border-radius: 2px;
++    background: #2a2a2a;
++  }
+   .media-table {
+     background: #fff;
+     margin-top: 10px;
+-- 
+2.47.3
+

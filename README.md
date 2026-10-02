@@ -53,6 +53,7 @@ Bisherige Patches:
 - **control 0009:** Flugrouten auf der Karte (Flaeche + berechnete Bahn), Flaechenrouten als Kopie bearbeiten
 - **control 0010:** Mapping-Auftraege und Ergebnis-Layer in der Oberflaeche loeschen
 - **control 0011:** Mapping-Auftraege abbrechen (auch waehrend der Rechenknoten rechnet)
+- **control 0012:** Vorschaubilder in der Medienliste (Foto, Waermebild, Multispektral)
 
 ## Schnellstart
 

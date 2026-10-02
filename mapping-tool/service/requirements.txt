@@ -12,6 +12,7 @@ h11==0.16.0
 idna==3.20
 minio==7.2.20
 opentelemetry-api==1.45.0
+pillow==12.3.0
 pycparser==3.0
 pycryptodome==3.23.0
 pydantic==2.13.5

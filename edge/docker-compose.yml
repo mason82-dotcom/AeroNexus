@@ -193,6 +193,8 @@ services:
       WOL_MAC: ${WOL_MAC}
       WOL_BROADCAST: ${WOL_BROADCAST}
       TZ: Europe/Berlin
+    volumes:
+      - mapping-cache:/cache       # media thumbnails (regenerated on demand if lost)
     ports:
       - "6790:6790"     # mapping API (web UI + compute agent)
     depends_on:
@@ -225,3 +227,6 @@ services:
       - "8085:80"       # Web UI + Pilot 2 login page (/pilot-login); host 8080 taken by nextcloud-aio
     depends_on:
       - api
+
+volumes:
+  mapping-cache:

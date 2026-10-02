@@ -33,6 +33,7 @@ class Settings:
     default_lease_seconds: int
     max_lease_attempts: int
     dji_api_url: str
+    cache_dir: str
     wol_mac: str
     wol_broadcast: str
 
@@ -62,6 +63,7 @@ def load() -> Settings:
         default_lease_seconds=int(_env("MAPPING_LEASE_SECONDS", "600")),
         max_lease_attempts=int(_env("MAPPING_MAX_LEASE_ATTEMPTS", "3")),
         dji_api_url=_env("DJI_API_URL", "http://api:6789"),
+        cache_dir=_env("CACHE_DIR", "/cache"),
         wol_mac=os.environ.get("WOL_MAC", ""),
         wol_broadcast=os.environ.get("WOL_BROADCAST", ""),
     )

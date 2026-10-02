@@ -14,7 +14,7 @@ from .auth import User, agent_dependency, tile_user_dependency, user_dependency
 from .config import Settings
 from .models import PROFILES, Claim, Complete, Fail, Heartbeat, JobCreate, RouteCopy, UploadUrls, AgentRef
 from .storage import Storage
-from . import wpml
+from . import thumbs, wpml
 
 log = logging.getLogger("mapping.api")
 
@@ -117,6 +117,36 @@ def build_router(settings: Settings, storage: Storage) -> APIRouter:
         return {"total": total, "page": page, "page_size": page_size, "list": [
             {**r, "is_original": bool(r["is_original"]),
              "create_time": _iso(datetime.fromtimestamp(r["create_time"] / 1000, tz=timezone.utc).replace(tzinfo=None))} for r in rows]}
+
+    @router.get("/media/{file_id}/thumbnail.jpg")
+    def media_thumbnail(file_id: str, user: User = Depends(tile_user)):
+        """Thumbnail for the web media list (<img>, so the token comes as query parameter)."""
+        conn = db.connect(settings, settings.media_database)
+        try:
+            with conn.cursor() as cur:
+                cur.execute("SELECT file_name, object_key FROM media_file WHERE workspace_id = %s AND file_id = %s",
+                            (user.workspace_id, file_id))
+                row = cur.fetchone()
+        finally:
+            conn.close()
+        if not row or not thumbs.supported(row["file_name"]):
+            raise HTTPException(status_code=404, detail="no thumbnail for this file")
+
+        def load() -> bytes:
+            resp = storage.internal.get_object(settings.media_bucket, row["object_key"])
+            try:
+                return resp.read()
+            finally:
+                resp.close()
+                resp.release_conn()
+
+        try:
+            data = thumbs.get_or_create(settings.cache_dir, file_id, load)
+        except Exception as exc:
+            log.warning("thumbnail for %s failed: %s", row["file_name"], exc)
+            raise HTTPException(status_code=422, detail="image cannot be decoded") from exc
+        return Response(content=data, media_type="image/jpeg",
+                        headers={"Cache-Control": "private, max-age=604800"})
 
     @router.post("/jobs", status_code=201)
     def create_job(body: JobCreate, user: User = Depends(current_user)) -> dict:
