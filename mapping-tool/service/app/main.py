@@ -6,11 +6,14 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from . import config, db
+from .api import build_router
+from .storage import Storage
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
 log = logging.getLogger("mapping")
 
 settings = config.load()
+storage = Storage(settings)
 
 
 @asynccontextmanager
@@ -29,6 +32,9 @@ app.add_middleware(
     allow_methods=["GET", "POST", "DELETE"],
     allow_headers=["x-auth-token", "content-type", "authorization"],
 )
+
+
+app.include_router(build_router(settings, storage))
 
 
 @app.get("/health")
