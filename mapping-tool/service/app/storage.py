@@ -6,6 +6,7 @@ from inside the container. URLs handed out must use SERVER_HOST, never a docker 
 from datetime import timedelta
 
 from minio import Minio
+from minio.deleteobjects import DeleteObject
 from minio.error import S3Error
 
 from .config import Settings
@@ -39,3 +40,13 @@ class Storage:
 
     def has_prefix(self, bucket: str, prefix: str) -> bool:
         return any(True for _ in self.internal.list_objects(bucket, prefix=prefix, recursive=True))
+
+    def delete_prefix(self, bucket: str, prefix: str) -> int:
+        """Delete all objects below prefix (must end with '/'). Returns the number of deleted objects."""
+        if not prefix.endswith("/") or prefix == "/":
+            raise ValueError("prefix must be a non-empty directory prefix")
+        names = [o.object_name for o in self.internal.list_objects(bucket, prefix=prefix, recursive=True)]
+        errors = list(self.internal.remove_objects(bucket, (DeleteObject(n) for n in names)))
+        if errors:
+            raise RuntimeError(f"{len(errors)} object(s) could not be deleted, first: {errors[0]}")
+        return len(names)

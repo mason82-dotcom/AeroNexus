@@ -169,6 +169,39 @@ def build_router(settings: Settings, storage: Storage) -> APIRouter:
             cur.execute("SELECT * FROM map_layer WHERE workspace_id = %s ORDER BY created_at DESC", (user.workspace_id,))
             return [_layer_out(r) for r in cur.fetchall()]
 
+    @router.delete("/jobs/{job_id}")
+    def delete_job(job_id: str, user: User = Depends(current_user)) -> dict:
+        """Delete a job with its results and layers. Jobs leased to an agent cannot be deleted."""
+        with db.transaction(settings) as cur:
+            requeue_expired(cur, settings)
+            cur.execute("SELECT status FROM mapping_job WHERE id = %s AND workspace_id = %s FOR UPDATE",
+                        (job_id, user.workspace_id))
+            row = cur.fetchone()
+            if not row:
+                raise HTTPException(status_code=404, detail="job not found")
+            if row["status"] in ACTIVE:
+                raise HTTPException(status_code=409, detail="job is being processed by a compute node")
+            deleted = storage.delete_prefix(settings.results_bucket, f"{job_id}/")
+            cur.execute("DELETE FROM map_layer WHERE job_id = %s", (job_id,))
+            layers = cur.rowcount
+            cur.execute("DELETE FROM mapping_job WHERE id = %s", (job_id,))
+        log.info("job %s deleted by %s (%d objects, %d layers)", job_id, user.username, deleted, layers)
+        return {"deleted_objects": deleted, "deleted_layers": layers}
+
+    @router.delete("/layers/{layer_id}")
+    def delete_layer(layer_id: str, user: User = Depends(current_user)) -> dict:
+        """Delete a map layer and its tiles; the job and its other results (COGs, report) stay."""
+        with db.transaction(settings) as cur:
+            cur.execute("SELECT * FROM map_layer WHERE id = %s AND workspace_id = %s FOR UPDATE",
+                        (layer_id, user.workspace_id))
+            layer = cur.fetchone()
+            if not layer:
+                raise HTTPException(status_code=404, detail="layer not found")
+            deleted = storage.delete_prefix(layer["bucket"], layer["tile_prefix"].rstrip("/") + "/")
+            cur.execute("DELETE FROM map_layer WHERE id = %s", (layer_id,))
+        log.info("layer %s deleted by %s (%d tiles)", layer_id, user.username, deleted)
+        return {"deleted_objects": deleted}
+
     @router.get("/layers/{layer_id}/tiles/{z}/{x}/{y}.{fmt}")
     def tile(layer_id: str, z: int, x: int, y: int, fmt: str, user: User = Depends(tile_user)):
         with db.transaction(settings) as cur:
