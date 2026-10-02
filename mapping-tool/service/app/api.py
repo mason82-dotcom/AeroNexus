@@ -45,6 +45,9 @@ def _layer_out(row: dict) -> dict:
         "format": row["tile_format"], "min_zoom": row["min_zoom"], "max_zoom": row["max_zoom"],
         "bounds_wgs84": json.loads(row["bounds_wgs84"]) if row["bounds_wgs84"] else None,
         "crs": row["crs"], "opacity": float(row["opacity"]), "attribution": row["attribution"],
+        "kind": row["kind"], "relative": bool(row["is_relative"]),
+        "legend": json.loads(row["legend"]) if row["legend"] else None,
+        "stats": json.loads(row["stats"]) if row["stats"] else None,
         "created_at": _iso(row["created_at"]),
         # relative to the service base URL; the web adds ?token=<x-auth-token>
         "tile_url": f"/api/mapping/layers/{row['id']}/tiles/{{z}}/{{x}}/{{y}}.{row['tile_format']}",
@@ -472,11 +475,15 @@ def build_router(settings: Settings, storage: Storage) -> APIRouter:
         bucket = settings.results_bucket
         # checks run before the row lock: they only read MinIO
         missing = [f.path for f in manifest.files if not storage.exists(bucket, f"{job_id}/{f.path}")]
-        if manifest.tiles and not storage.has_prefix(bucket, f"{job_id}/{manifest.tiles.path}/"):
-            missing.append(f"{manifest.tiles.path}/")
+        for t in ([manifest.tiles] if manifest.tiles else []) + list(manifest.layers):
+            if t.minzoom > t.maxzoom:
+                raise HTTPException(status_code=422, detail=f"{t.path}: minzoom > maxzoom")
+            if not storage.has_prefix(bucket, f"{job_id}/{t.path}/"):
+                missing.append(f"{t.path}/")
         if missing:
             raise HTTPException(status_code=422, detail={"missing": missing[:100]})
         layer_id = None
+        layer_ids: list[str] = []
         with db.transaction(settings) as cur:
             job = lock_active_job(cur, job_id, body.agent_id)
             for f in manifest.files:
@@ -484,20 +491,26 @@ def build_router(settings: Settings, storage: Storage) -> APIRouter:
                     "INSERT INTO mapping_result (job_id, kind, object_key, sha256, size_bytes) VALUES (%s, %s, %s, %s, %s)"
                     " ON DUPLICATE KEY UPDATE kind = VALUES(kind), sha256 = VALUES(sha256), size_bytes = VALUES(size_bytes)",
                     (job_id, f.kind, f"{job_id}/{f.path}", f.sha256, f.size))
-            if manifest.tiles:
-                layer_id = str(uuid.uuid4())
+            bounds = json.dumps(manifest.bounds_wgs84) if manifest.bounds_wgs84 else None
+            entries = ([(manifest.tiles, job["name"], "orthophoto", None, None, False)] if manifest.tiles else []) + [
+                (lay, f"{job['name']} - {lay.name}" + (" (relative)" if lay.relative else ""), lay.kind,
+                 lay.legend, lay.stats, lay.relative) for lay in manifest.layers]
+            for tiles, name, kind, legend, stats, relative in entries:
+                lid = str(uuid.uuid4())
                 cur.execute(
-                    "INSERT INTO map_layer (id, workspace_id, job_id, name, layer_type, bucket, tile_prefix,"
-                    " tile_format, min_zoom, max_zoom, bounds_wgs84, crs) VALUES"
-                    " (%s, %s, %s, %s, 'xyz', %s, %s, %s, %s, %s, %s, %s)",
-                    (layer_id, job["workspace_id"], job_id, job["name"], bucket, f"{job_id}/{manifest.tiles.path}",
-                     manifest.tiles.format, manifest.tiles.minzoom, manifest.tiles.maxzoom,
-                     json.dumps(manifest.bounds_wgs84) if manifest.bounds_wgs84 else None, manifest.crs))
+                    "INSERT INTO map_layer (id, workspace_id, job_id, name, layer_type, kind, bucket, tile_prefix,"
+                    " tile_format, min_zoom, max_zoom, bounds_wgs84, crs, legend, stats, is_relative) VALUES"
+                    " (%s, %s, %s, %s, 'xyz', %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)",
+                    (lid, job["workspace_id"], job_id, name[:200], kind, bucket, f"{job_id}/{tiles.path}",
+                     tiles.format, tiles.minzoom, tiles.maxzoom, bounds, manifest.crs,
+                     json.dumps(legend) if legend else None, json.dumps(stats) if stats else None, int(relative)))
+                layer_ids.append(lid)
+            layer_id = layer_ids[0] if layer_ids else None
             cur.execute(
                 "UPDATE mapping_job SET status = 'DONE', progress = 100, message = 'completed', lease_until = NULL,"
                 " finished_at = UTC_TIMESTAMP(3), updated_at = UTC_TIMESTAMP(3) WHERE id = %s", (job_id,))
         log.info("job %s completed by %s: %d file(s), layer %s", job_id, body.agent_id, len(manifest.files), layer_id)
-        return {"status": "DONE", "layer_id": layer_id}
+        return {"status": "DONE", "layer_id": layer_id, "layer_ids": layer_ids}
 
     @router.post("/agent/jobs/{job_id}/fail", dependencies=[Depends(agent)])
     def fail(job_id: str, body: Fail) -> dict:

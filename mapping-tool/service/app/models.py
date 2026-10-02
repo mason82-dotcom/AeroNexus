@@ -19,13 +19,15 @@ PROFILES: dict[str, dict] = {
     "fast": {"fast-orthophoto": True, "feature-quality": "medium", "skip-3dmodel": True},
     "standard": {"feature-quality": "high", "pc-quality": "medium", "skip-3dmodel": True},
     "high": {"feature-quality": "ultra", "pc-quality": "high", "dsm": True},
+    # Farming Guide: Mavic 3M bands (G/R/RE/NIR TIFs) -> multiband orthophoto -> relative vegetation indices
+    "multispectral": {"radiometric-calibration": "camera+sun", "primary-band": "NIR", "skip-3dmodel": True},
 }
 
 
 class JobCreate(BaseModel):
     name: str = Field(min_length=1, max_length=200)
     image_keys: list[str] = Field(min_length=1, max_length=5000)
-    profile: Literal["fast", "standard", "high"] = "standard"
+    profile: Literal["fast", "standard", "high", "multispectral"] = "standard"
     odm_options: dict[str, str | int | float | bool] = Field(default_factory=dict, max_length=50)
 
     @field_validator("image_keys")
@@ -95,11 +97,21 @@ class ManifestTiles(BaseModel):
         return check_relative_path(path)
 
 
+class ManifestLayer(ManifestTiles):
+    """Additional tile layer of a job, e.g. a vegetation index of the Farming Guide."""
+    kind: str = Field(pattern=r"^[a-z0-9_]{1,32}$")      # e.g. ndvi, ndre, gndvi
+    name: str = Field(min_length=1, max_length=60)        # appended to the job name
+    legend: dict | None = None                            # {"range": [lo, hi], "palette": [[v, "#rrggbb"], ...], "unit": ""}
+    stats: dict | None = None                             # {"mean", "std", "min", "max", "p10", "p50", "p90", "valid_ratio"}
+    relative: bool = False
+
+
 class Manifest(BaseModel):
     crs: str | None = Field(default=None, max_length=32)
     bounds_wgs84: list[float] | None = Field(default=None, min_length=4, max_length=4)
     files: list[ManifestFile] = Field(default_factory=list, max_length=10000)
     tiles: ManifestTiles | None = None
+    layers: list[ManifestLayer] = Field(default_factory=list, max_length=20)
 
 
 class Complete(AgentRef):

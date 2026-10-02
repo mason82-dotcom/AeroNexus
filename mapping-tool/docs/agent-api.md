@@ -126,6 +126,21 @@ Kachel unter dem Pfad), legt pro Datei einen `mapping_result`-Eintrag an und bei
 `map_layer` (XYZ, Name = Auftragsname). Antwort `200`: `{"status": "DONE", "layer_id": "..."}`.
 Fehlende Dateien: `422` mit Liste.
 
+Zusaetzliche Layer (Farming Guide, ab 2026-10-02): `manifest.layers` ist eine Liste weiterer
+Kachelsaetze, je Eintrag ein eigener `map_layer`:
+
+```json
+"layers": [
+  {"path": "ndvi_tiles", "format": "png", "minzoom": 14, "maxzoom": 20,
+   "kind": "ndvi", "name": "NDVI", "relative": true,
+   "legend": {"range": [-0.2, 0.9], "palette": [[-0.2, "#a50026"], [0.9, "#006837"]]},
+   "stats": {"mean": 0.61, "std": 0.12, "min": -0.1, "max": 0.88, "p10": 0.45, "p50": 0.63, "p90": 0.76, "valid_ratio": 0.93}}
+]
+```
+
+Der Layername ist `<Auftragsname> - <name>` plus " (relative)". Profil `multispectral` setzt
+`radiometric-calibration=camera+sun`, `primary-band=NIR`, `skip-3dmodel`.
+
 `kind`-Werte (frei erweiterbar): `orthophoto_cog`, `dsm_cog`, `dtm_cog`, `report`, `log`, `other`.
 `bounds_wgs84` ist `[west, south, east, north]`.
 
