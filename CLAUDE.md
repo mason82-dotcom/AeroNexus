@@ -72,7 +72,9 @@ Editing routes (mapping-tool/service/app/wpml.py, verified with Pilot 2 on RC Pr
 
 ## Mapping tool
 - Own FastAPI service `mapping-tool/service`, NOT a patch on the DJI backend (ADR-001).
-  Own DB `mapping`, migrations = numbered SQL files applied on start. Auth: DJI JWT (x-auth-token)
+  Own DB `mapping`, migrations = numbered SQL files applied on start. DB user `mapping` (no root): created
+  by the one-shot `mapping-db-init` (mysql image) on every start; needs SELECT grants for each new
+  cloud_sample table the service reads. Auth: DJI JWT (x-auth-token)
   for the web, `MAPPING_AGENT_TOKEN` bearer for the compute agent. Agent API: mapping-tool/docs/agent-api.md.
 - Results in bucket `mapping-results/{jobId}/`, tiles via 302 to presigned URLs (bucket stays private).
 - Test without x64 node: `python3 mapping-tool/service/tools/sim_agent.py`.

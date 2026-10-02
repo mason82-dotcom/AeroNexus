@@ -158,6 +158,20 @@ services:
       minio-init:
         condition: service_completed_successfully
 
+  mapping-db-init:
+    # creates the restricted MySQL user of the mapping service (idempotent, every start)
+    image: mysql:8.0.39
+    entrypoint: ["/bin/sh", "/init/init.sh"]
+    environment:
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD}
+      MAPPING_DB_PASSWORD: ${MAPPING_DB_PASSWORD}
+    volumes:
+      - ../mapping-tool/service/db-init/init.sh:/init/init.sh:ro
+    depends_on:
+      mysql:
+        condition: service_healthy
+    restart: "no"
+
   mapping:
     <<: *restart
     # AeroNexus Mapping Tool: jobs, compute-agent API, map layers (mapping-tool/docs/adr-001-architektur.md)
@@ -166,7 +180,8 @@ services:
     image: aeronexus/mapping:local
     environment:
       SERVER_HOST: ${SERVER_HOST}
-      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD}
+      MYSQL_USER: mapping
+      MYSQL_PASSWORD: ${MAPPING_DB_PASSWORD}
       JWT_SECRET: ${JWT_SECRET}
       MAPPING_AGENT_TOKEN: ${MAPPING_AGENT_TOKEN}
       PRESIGN_TTL_SECONDS: ${PRESIGN_TTL_SECONDS}
@@ -181,8 +196,8 @@ services:
     ports:
       - "6790:6790"     # mapping API (web UI + compute agent)
     depends_on:
-      mysql:
-        condition: service_healthy
+      mapping-db-init:
+        condition: service_completed_successfully
       minio-init:
         condition: service_completed_successfully
 

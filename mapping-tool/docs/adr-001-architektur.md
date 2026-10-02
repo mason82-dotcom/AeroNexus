@@ -32,9 +32,10 @@ Das Mapping-Backend ist ein eigener Dienst `mapping-tool/service`:
 Gruende: kein weiterer Patch gegen archivierten Fremdcode, unabhaengig deploybar und testbar,
 Python passt zur Geo-Werkzeugkette (GDAL, rasterio) der spaeteren Phasen.
 
-Bekannte Vereinfachung (MVP): Der Dienst verbindet sich als MySQL-root (Datenbank anlegen,
-Migrationen, Lesezugriff auf `cloud_sample`). Ein eigener MySQL-Benutzer folgt, sobald es ein
-Init-Verfahren fuer bereits initialisierte MySQL-Datenverzeichnisse gibt.
+Datenbankzugriff: eigener MySQL-Benutzer `mapping` (alle Rechte auf `mapping`, nur SELECT auf
+`cloud_sample.media_file` und `cloud_sample.wayline_file`). Ihn legt der Einmal-Container
+`mapping-db-init` bei jedem Start idempotent an (auch bei schon initialisiertem MySQL-Datenverzeichnis).
+Der Dienst selbst kennt das MySQL-root-Passwort nicht (Nachtrag 2026-10-02).
 
 ### 2. Pull-Agent statt Push
 
@@ -88,7 +89,7 @@ Leaflet bleibt (Phasen 1 bis 3), MapLibre wird in Phase 4 geprueft.
 
 ## Folgen
 
-- Neue Secrets in `edge/.env`: `MAPPING_AGENT_TOKEN`, eigener MinIO-Benutzer `MAPPING_MINIO_USER`/
+- Neue Secrets in `edge/.env`: `MAPPING_AGENT_TOKEN`, `MAPPING_DB_PASSWORD`, eigener MinIO-Benutzer `MAPPING_MINIO_USER`/
   `MAPPING_MINIO_PASSWORD` (Rechte: lesen `dji-cloud`, lesen/schreiben `mapping-results`, `basemaps`).
 - Neuer Port 6790 (Mapping-API fuer Web-UI und Agent).
 - MinIO-Buckets `mapping-results` und `basemaps`, CORS mit `Range`/`Content-Range`.
