@@ -50,6 +50,7 @@ cat > $RT/emqx/auth-bootstrap.csv <<CSV
 user_id,password,is_superuser
 ${MQTT_SERVER_USER},${MQTT_SERVER_PASSWORD},true
 ${MQTT_PILOT_USER},${MQTT_PILOT_PASSWORD},false
+${MQTT_PILOT2_USER},${MQTT_PILOT2_PASSWORD},false
 CSV
 
 if [ -d data/mysql/mysql ]; then

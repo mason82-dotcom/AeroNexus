@@ -75,7 +75,8 @@ Die SQL-Dateien laufen nur beim allerersten Start von MySQL (leeres `data/mysql`
 2. Pilot 2 öffnen, auf der Startseite **Cloud Services** wählen und dort die Drittanbieter-Plattform
    (**Open Platform**) auswählen.
 3. URL eingeben: `http://<SERVER_HOST>:8085/pilot-login`
-4. Mit `pilot` und `PILOT_LOGIN_PASSWORD` anmelden. Die Seite prüft die DJI-License per JSBridge
+4. Mit `pilot` und `PILOT_LOGIN_PASSWORD` anmelden (zweite Fernsteuerung, z. B. RC Plus 2: `pilot2` und
+   `PILOT2_LOGIN_PASSWORD`, eigener MQTT-Benutzer `MQTT_PILOT2_USER`). Die Seite prüft die DJI-License per JSBridge
    und verbindet danach automatisch MQTT, API, Karte, Medien, Wegpunkte und Livestream.
 5. Im Browser `http://<SERVER_HOST>:8085` mit `adminPC` öffnen. Der Controller samt Fluggerät
    sollte unter Geräte bzw. im Lagebild erscheinen.
@@ -126,6 +127,8 @@ Weitere Wege zum selben Stream:
   (beobachtet mit Mavic 3E am RC Pro Enterprise, 02.10.2026).
 - **Medien-Upload schlägt fehl:** `minio-init` muss mit Exit 0 enden (`docker compose logs minio-init`);
   `SERVER_HOST:9000` muss vom Controller aus erreichbar sein.
+- **Neuer Login in bestehender Installation:** Die Bootstrap-CSV von EMQX und die SQL-Dateien greifen nur beim
+  allerersten Start. Neue Benutzer (z. B. `pilot2`) zusaetzlich per EMQX-Dashboard/API und SQL anlegen.
 - **SQL-Änderungen greifen nicht:** MySQL war schon initialisiert. Dann `runtime/initdb/02_*.sql` und `03_*.sql`
   per `docker compose exec -T mysql mysql -uroot -p... < datei.sql` einspielen.
 
