@@ -19,7 +19,7 @@ Self-hosted drone platform on DJI Cloud API (DJI Pilot 2 -> own server). Monorep
 - `SERVER_HOST` must be reachable from the remote controller. Never put docker hostnames into
   anything that is handed to DJI Pilot 2 (MQTT host, OSS endpoint, RTMP URL, web base URL).
 - ASCII-only source/config files. Single exception: `control` web `src/locales/de.ts` (German UI texts,
-  UTF-8 with real umlauts). Services write umlauts in user-facing messages as `ä`-style escapes.
+  UTF-8 with real umlauts). Services write umlauts in user-facing messages as `\u00e4`-style escapes.
 
 ## UI language
 - The web UI is German. Code keeps English texts as keys: `$t('...')` in templates, `t('...')` from
