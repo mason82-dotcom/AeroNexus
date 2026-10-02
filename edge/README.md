@@ -62,12 +62,17 @@ Die SQL-Dateien laufen nur beim allerersten Start von MySQL (leeres `data/mysql`
 | 8085 | Web-UI + Pilot-Login | Browser, Pilot 2 |
 | 6789 | Backend API + WebSocket | Browser, Pilot 2 |
 | 1884 / 8084 | MQTT / MQTT über WS | Pilot 2, Backend |
-| 9000 / 9001 | MinIO S3 / Konsole | Pilot 2 (Uploads) / Admin |
+| 9000 | MinIO S3 | Pilot 2 (Uploads), Browser, Compute-Agent |
 | 1935 | RTMP-Ingest | Pilot 2 |
-| 8889 / 8888 / 8554 | WebRTC (WHEP/WHIP) / HLS / RTSP | Browser, VLC |
+| 8889 / 8888 / 8554 | WebRTC (WHEP/WHIP) / HLS / RTSP | Browser (mit Web-Login), VLC (mit RTSP-Login) |
+| 6790 / 6791 | Mapping / Farming | Browser, Compute-Agent |
 | 8189/udp | WebRTC-Medien | Browser |
-| 9997 | MediaMTX API | Admin (nur vom Server selbst, MediaMTX-Default) |
-| 18083 | EMQX Dashboard | Admin (User `admin`) |
+| 9001 | MinIO-Konsole | nur auf dem Server (127.0.0.1) |
+| 9997 | MediaMTX API | nur auf dem Server (127.0.0.1) |
+| 18083 | EMQX Dashboard (User `admin`) | nur auf dem Server (127.0.0.1) |
+
+Admin-Oberflächen vom PC aus per SSH-Tunnel: `ssh -L 18083:localhost:18083 -L 9001:localhost:9001 <user>@<SERVER_HOST>`,
+dann `http://localhost:18083` bzw. `http://localhost:9001` im Browser.
 
 ## Controller verbinden
 
@@ -100,7 +105,8 @@ Einsätze ohne Internet einen eigenen Kachelserver eintragen.
 Im Web-UI unter **Livestream**: Fluggerät, Kamera und Qualität wählen, Typ **RTMP**, Start.
 Das Video erscheint direkt auf der Seite, darunter steht der Player-Status.
 
-Ablauf: Pilot 2 schickt per RTMP an MediaMTX (`rtmp://<SERVER_HOST>:1935/live/<SN>-<Payload>`),
+Ablauf: Pilot 2 schickt per RTMP an MediaMTX (`rtmp://<SERVER_HOST>:1935/live/<SN>-<Payload>?user=…&pass=…`,
+die Sende-Zugangsdaten `LIVE_PUBLISH_*` hängt das Backend an),
 der Browser holt den Stream per WebRTC (WHEP, ca. 0,3 s Verzögerung). Kann der Browser H.264 nicht
 über WebRTC dekodieren, wechselt der Player automatisch auf HLS (2 bis 4 s Verzögerung).
 Die ersten Sekunden nach dem Start meldet der Player "waiting for stream", bis die Drohne sendet.
@@ -110,8 +116,13 @@ das für Mavic 3E/3T/3M und Matrice 4T anbietet, hängt von Firmware und Pilot-V
 
 Weitere Wege zum selben Stream:
 - Liste aktiver Streams (auf dem Server): `curl http://127.0.0.1:9997/v3/paths/list`
-- Eigener Browser-Tab: `http://<SERVER_HOST>:8889/live/<SN>-<Payload>`
-- VLC: `rtsp://<SERVER_HOST>:8554/live/<SN>-<Payload>`
+- VLC: `rtsp://<RTSP_USER>:<RTSP_PASSWORD>@<SERVER_HOST>:8554/live/<SN>-<Payload>`
+
+Zugriffsschutz: MediaMTX fragt bei jedem Senden und Abspielen den Mapping-Dienst
+(`mapping-tool/service/app/mediaauth.py`). Senden nur mit `LIVE_PUBLISH_*`, Abspielen nur mit gültigem
+Web-Login oder RTSP-Zugangsdaten. Abgelehnte Zugriffe stehen im Log: `docker compose logs mapping | grep denied`.
+Meldet der Player "not allowed to watch", ist der Web-Login abgelaufen (24 h): neu anmelden.
+Läuft der Mapping-Dienst nicht, startet kein Livestream.
 
 ## Fehlersuche
 
@@ -161,6 +172,15 @@ ausser Haus (z. B. `BACKUP_DIR` per Borg/rsync auf ein externes Ziel).
 ## Sicherheit
 
 Nur für LAN/VPN gedacht. Alles läuft unverschlüsselt (HTTP, MQTT ohne TLS).
+
+Absicherung im LAN:
+- MQTT: Anmeldung Pflicht; Pilot-Konten dürfen nur die Geräteseite der DJI-Topics nutzen
+  (`telemetry/emqx/acl.conf`): keine Befehle im Namen des Servers, keine fremde Telemetrie, keine Wildcards.
+- Livestream: Senden und Abspielen nur mit Zugangsdaten (siehe Livestream).
+- Admin-Oberflächen (EMQX, MinIO-Konsole, MediaMTX-API) nur auf dem Server selbst.
+- Mapping/Farming nehmen Browser-Anfragen (CORS) nur von der Web-Oberfläche an.
+- Login-Tokens werden nicht mehr in Zugriffslogs geschrieben.
+
 Für Zugriff über 4G: Reverse-Proxy mit TLS (z. B. Caddy) und WireGuard, MQTT auf 8883 mit TLS.
 MinIO CE bekommt keine Updates mehr und wird nicht mehr als Image verteilt; AeroNexus baut es aus dem
 gepinnten Quellcode (`evidence/docker/minio`). Nicht ins Internet exponieren.

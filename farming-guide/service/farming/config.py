@@ -17,6 +17,7 @@ class Settings:
     mapping_url: str            # internal URL of the mapping service (layer lookup with the user's token)
     results_bucket: str         # mapping results (index COGs), read only
     bucket: str                 # own bucket for zone maps and exports
+    web_origin: str             # browser origin of the web UI (CORS)
 
 
 def load() -> Settings:
@@ -30,4 +31,5 @@ def load() -> Settings:
         mapping_url=_env("MAPPING_URL", "http://mapping:6790").rstrip("/"),
         results_bucket=_env("MAPPING_RESULTS_BUCKET", "mapping-results"),
         bucket=_env("FARMING_BUCKET", "farming"),
+        web_origin=_env("WEB_ORIGIN", "*"),
     )

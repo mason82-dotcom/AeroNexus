@@ -117,7 +117,8 @@ livestream:
       token: unused
       uid: 654321
     rtmp:
-      url: rtmp://${SERVER_HOST}:1935/live/
+      # {stream} = <droneSn>-<payloadIndex>; query = publish credentials for MediaMTX (compose RTMP_URL)
+      url: "${RTMP_URL:rtmp://${SERVER_HOST}:1935/live/}"
     rtsp:
       username: ${RTSP_USER}
       password: ${RTSP_PASSWORD}

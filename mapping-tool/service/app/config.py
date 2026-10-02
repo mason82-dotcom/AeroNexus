@@ -36,6 +36,11 @@ class Settings:
     cache_dir: str
     wol_mac: str
     wol_broadcast: str
+    live_publish_user: str      # Pilot 2 -> MediaMTX (RTMP/WHIP query ?user=&pass=)
+    live_publish_password: str
+    rtsp_user: str              # RTSP readers (VLC)
+    rtsp_password: str
+    web_origin: str             # browser origin of the web UI (CORS)
 
 
 def load() -> Settings:
@@ -66,4 +71,9 @@ def load() -> Settings:
         cache_dir=_env("CACHE_DIR", "/cache"),
         wol_mac=os.environ.get("WOL_MAC", ""),
         wol_broadcast=os.environ.get("WOL_BROADCAST", ""),
+        live_publish_user=_env("LIVE_PUBLISH_USER", "pilot2cloud"),
+        live_publish_password=_env("LIVE_PUBLISH_PASSWORD"),
+        rtsp_user=os.environ.get("RTSP_USER", ""),
+        rtsp_password=os.environ.get("RTSP_PASSWORD", ""),
+        web_origin=_env("WEB_ORIGIN", f"http://{server_host}:8085"),
     )

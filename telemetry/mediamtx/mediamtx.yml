@@ -1,20 +1,29 @@
 # RTMP ingest from DJI Pilot 2 -> WebRTC / HLS / RTSP for browser and VLC
 logLevel: info
+
+# Every publish/read is checked by the mapping service (mapping-tool/service/app/mediaauth.py):
+#   publish: credentials in the RTMP/WHIP URL the backend hands to Pilot 2 (LIVE_PUBLISH_*)
+#   read:    web login (Bearer JWT) or RTSP_USER/RTSP_PASSWORD (VLC)
+#   api/metrics/pprof/playback: only from the server itself
+# Host network: 127.0.0.1:6790 is the published port of the mapping container.
+authMethod: http
+authHTTPAddress: http://127.0.0.1:6790/internal/mediamtx-auth
+authHTTPExclude: []
+
 rtmp: yes
 rtmpAddress: :1935
 rtsp: yes
 rtspAddress: :8554
 hls: yes
 hlsAddress: :8888
-hlsAllowOrigin: '*'
 hlsVariant: lowLatency
 webrtc: yes
 webrtcAddress: :8889
-webrtcAllowOrigin: '*'
 # media over UDP; container runs with host network, so the LAN IP is announced directly
 webrtcLocalUDPAddress: :8189
+# allowed browser origins come from compose (MTX_HLSALLOWORIGIN / MTX_WEBRTCALLOWORIGIN = web UI)
 api: yes
-apiAddress: :9997
+apiAddress: 127.0.0.1:9997
 paths:
-  # accept any stream name (Pilot appends its own video id to rtmp://host:1935/live/)
+  # accept any stream name (backend builds rtmp://host:1935/live/<droneSn>-<payloadIndex>)
   all_others:

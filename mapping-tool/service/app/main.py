@@ -6,7 +6,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from . import config, db
+from . import config, db, mediaauth
 from .api import build_router
 from .storage import Storage
 
@@ -38,16 +38,17 @@ async def lifespan(_app: FastAPI):
 
 app = FastAPI(title="AeroNexus Mapping", version="0.1.0", lifespan=lifespan)
 
-# Same policy as the DJI backend: the web UI runs on another port of the same host.
+# Only the web UI (another port of the same host) may call the API from a browser.
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=[settings.web_origin],
     allow_methods=["GET", "POST", "DELETE"],
     allow_headers=["x-auth-token", "content-type", "authorization"],
 )
 
 
 app.include_router(build_router(settings, storage))
+app.include_router(mediaauth.build_router(settings))
 
 
 @app.get("/health")

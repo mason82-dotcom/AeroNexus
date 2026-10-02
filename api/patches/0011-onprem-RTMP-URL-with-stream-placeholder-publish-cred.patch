@@ -1,0 +1,65 @@
+From b90a25f3ad098272508d55cb8c870700e8b2f6a7 Mon Sep 17 00:00:00 2001
+From: RomaN <mason82.rm@googlemail.com>
+Date: Fri, 2 Oct 2026 21:57:00 +0200
+Subject: [PATCH] onprem: RTMP URL with {stream} placeholder, publish
+ credentials never sent to the browser
+
+---
+ .../service/impl/LiveStreamServiceImpl.java   | 22 +++++++++++++++----
+ 1 file changed, 18 insertions(+), 4 deletions(-)
+
+diff --git a/sample/src/main/java/com/dji/sample/manage/service/impl/LiveStreamServiceImpl.java b/sample/src/main/java/com/dji/sample/manage/service/impl/LiveStreamServiceImpl.java
+index b8de823..f9bee76 100644
+--- a/sample/src/main/java/com/dji/sample/manage/service/impl/LiveStreamServiceImpl.java
++++ b/sample/src/main/java/com/dji/sample/manage/service/impl/LiveStreamServiceImpl.java
+@@ -94,7 +94,8 @@ public class LiveStreamServiceImpl implements ILiveStreamService {
+             case AGORA:
+                 break;
+             case RTMP:
+-                live.setUrl(url.toString().replace("rtmp", "webrtc"));
++                // onprem: never hand the publish credentials (?user=&pass=) to the browser
++                live.setUrl(stripQuery(url.toString()).replace("rtmp", "webrtc"));
+                 break;
+             case GB28181:
+                 LivestreamGb28181Url gb28181 = (LivestreamGb28181Url) url;
+@@ -111,7 +112,7 @@ public class LiveStreamServiceImpl implements ILiveStreamService {
+                 live.setUrl(response.getData().getOutput());
+                 break;
+             case WHIP:
+-                live.setUrl(url.toString().replace("whip", "whep"));
++                live.setUrl(stripQuery(url.toString()).replace("whip", "whep"));
+                 break;
+             default:
+                 return HttpResultResponse.error(LiveErrorCodeEnum.URL_TYPE_NOT_SUPPORTED);
+@@ -217,7 +218,12 @@ public class LiveStreamServiceImpl implements ILiveStreamService {
+                 return agoraUrl.setSn(videoId.getDroneSn());
+             case RTMP:
+                 LivestreamRtmpUrl rtmpUrl = (LivestreamRtmpUrl) url.clone();
+-                return rtmpUrl.setUrl(rtmpUrl.getUrl() + videoId.getDroneSn() + "-" + videoId.getPayloadIndex().toString());
++                String rtmpStream = videoId.getDroneSn() + "-" + videoId.getPayloadIndex().toString();
++                // onprem: {stream} placeholder so publish credentials can follow as query (MediaMTX auth)
++                if (rtmpUrl.getUrl().contains("{stream}")) {
++                    return rtmpUrl.setUrl(rtmpUrl.getUrl().replace("{stream}", rtmpStream));
++                }
++                return rtmpUrl.setUrl(rtmpUrl.getUrl() + rtmpStream);
+             case GB28181:
+                 String random = String.valueOf(Math.abs(videoId.getDroneSn().hashCode()) % 1000);
+                 LivestreamGb28181Url gbUrl = (LivestreamGb28181Url) url.clone();
+@@ -235,4 +241,12 @@ public class LiveStreamServiceImpl implements ILiveStreamService {
+         }
+         return url;
+     }
+-}
+\ No newline at end of file
++
++    /**
++     * onprem: drop the query string (publish credentials) of a livestream URL.
++     */
++    private static String stripQuery(String url) {
++        int q = url.indexOf('?');
++        return q < 0 ? url : url.substring(0, q);
++    }
++}
+-- 
+2.47.3
+

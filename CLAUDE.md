@@ -57,6 +57,13 @@ New device = DeviceTypeEnum + DeviceEnum (+ GatewayTypeEnum if it is a gateway/R
   for RTMP; the web maps it to `<VITE_WHEP_BASE>live/<name>/whep` or `<VITE_HLS_BASE>live/<name>/index.m3u8`.
 - WHIP url uses `{stream}` placeholder (backend patch 0002) because MediaMTX expects `/live/<name>/whip`.
 - MediaMTX does not transcode: the browser must decode what the drone sends (H.264).
+- MediaMTX auth (authMethod http) -> mapping `/internal/mediamtx-auth` (app/mediaauth.py): publish needs
+  LIVE_PUBLISH_* (query of RTMP_URL/WHIP_URL, backend patch 0011 strips it from URLs sent to the web),
+  read needs a web JWT (Bearer; native HLS ?jwt=) or RTSP_USER/PASSWORD. Web players send the token (patch 0018).
+- EMQX: `telemetry/emqx/acl.conf` ends with {deny, all} (keep no_match = allow: deny drops subscriptions of RCs
+  reconnecting right after an EMQX restart). Only the backend user is superuser. A new topic used by
+  Pilot 2 must be added there (device side: publish up-topics, subscribe down-topics).
+- Admin UIs (EMQX 18083, MinIO 9001, MediaMTX API 9997) are bound to 127.0.0.1; use an SSH tunnel.
 - RC (Pilot 2) streams the lens shown on the remote controller; video_id lens and live_lens_change are
   ignored (verified M3T 2026-10-02). Lens switching from the cloud is Dock-only. Stream: H.264 High 1280x720.
 

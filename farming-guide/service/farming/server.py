@@ -67,7 +67,8 @@ class Handler(BaseHTTPRequestHandler):
     server_version = "AeroNexusFarming/1"
 
     def _cors(self):
-        self.send_header("Access-Control-Allow-Origin", "*")
+        self.send_header("Access-Control-Allow-Origin", settings.web_origin)
+        self.send_header("Vary", "Origin")
         self.send_header("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
         self.send_header("Access-Control-Allow-Headers", "x-auth-token, content-type")
 

@@ -51,13 +51,17 @@ services:
       EMQX_AUTHENTICATION__1__USER_ID_TYPE: username
       EMQX_AUTHENTICATION__1__BOOTSTRAP_FILE: /opt/emqx/etc/auth-bootstrap.csv
       EMQX_AUTHENTICATION__1__BOOTSTRAP_TYPE: plain
+      # pilot accounts may only use the device side of the DJI topics (telemetry/emqx/acl.conf, ends with
+      # {deny, all}). no_match stays "allow": with "deny", RCs reconnecting within the first seconds after an
+      # EMQX restart (before the file source is active) lost their subscriptions (seen 2026-10-02).
     volumes:
       - ./runtime/emqx/auth-bootstrap.csv:/opt/emqx/etc/auth-bootstrap.csv:ro
+      - ../telemetry/emqx/acl.conf:/opt/emqx/etc/acl.conf:ro
       - ./data/emqx:/opt/emqx/data
     ports:
       - "1884:1883"     # MQTT (Pilot 2 + backend); host 1883 taken by mosquitto
       - "8084:8083"     # MQTT over WebSocket (DRC); host 8083 taken by calibre-web
-      - "18083:18083"   # EMQX dashboard
+      - "127.0.0.1:18083:18083"   # EMQX dashboard, server only (ssh -L 18083:localhost:18083 ...)
     healthcheck:
       test: ["CMD", "/opt/emqx/bin/emqx", "ctl", "status"]
       interval: 10s
@@ -81,7 +85,7 @@ services:
       - ./data/minio:/data
     ports:
       - "9000:9000"     # S3 API (Pilot 2 uploads directly here)
-      - "9001:9001"     # MinIO console
+      - "127.0.0.1:9001:9001"     # MinIO console, server only (ssh -L 9001:localhost:9001 ...)
 
   minio-init:
     build:
@@ -113,8 +117,14 @@ services:
     image: bluenviron/mediamtx:1.15.1
     # host network: WebRTC ICE candidates then carry the real LAN IP
     network_mode: host
+    environment:
+      MTX_HLSALLOWORIGIN: http://${SERVER_HOST}:8085
+      MTX_WEBRTCALLOWORIGIN: http://${SERVER_HOST}:8085
     volumes:
       - ../telemetry/mediamtx/mediamtx.yml:/mediamtx.yml:ro
+    depends_on:
+      mapping:
+        condition: service_healthy     # answers the stream auth requests
 
   api:
     <<: *restart
@@ -133,7 +143,8 @@ services:
       DRC_HOST: ${SERVER_HOST}
       DRC_PORT: "8084"
       OSS_ENDPOINT: http://${SERVER_HOST}:9000
-      WHIP_URL: http://${SERVER_HOST}:8889/live/{stream}/whip
+      WHIP_URL: http://${SERVER_HOST}:8889/live/{stream}/whip?user=${LIVE_PUBLISH_USER}&pass=${LIVE_PUBLISH_PASSWORD}
+      RTMP_URL: rtmp://${SERVER_HOST}:1935/live/{stream}?user=${LIVE_PUBLISH_USER}&pass=${LIVE_PUBLISH_PASSWORD}
       MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD}
       REDIS_PASSWORD: ${REDIS_PASSWORD}
       JWT_SECRET: ${JWT_SECRET}
@@ -199,6 +210,11 @@ services:
       # presigned URLs must use an address the x64 agent and browsers can reach, never a docker hostname
       MINIO_PUBLIC_ENDPOINT: ${SERVER_HOST}:9000
       WOL_MAC: ${WOL_MAC}
+      LIVE_PUBLISH_USER: ${LIVE_PUBLISH_USER}
+      LIVE_PUBLISH_PASSWORD: ${LIVE_PUBLISH_PASSWORD}
+      RTSP_USER: ${RTSP_USER}
+      RTSP_PASSWORD: ${RTSP_PASSWORD}
+      WEB_ORIGIN: http://${SERVER_HOST}:8085
       WOL_BROADCAST: ${WOL_BROADCAST}
       TZ: Europe/Berlin
     volumes:
@@ -230,6 +246,7 @@ services:
       AWS_ACCESS_KEY_ID: ${FARMING_MINIO_USER}
       AWS_SECRET_ACCESS_KEY: ${FARMING_MINIO_PASSWORD}
       AWS_REGION: us-east-1
+      WEB_ORIGIN: http://${SERVER_HOST}:8085
       TZ: Europe/Berlin
     ports:
       - "6791:6791"     # farming API (web UI)
