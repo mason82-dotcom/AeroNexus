@@ -76,4 +76,8 @@ Editing routes (mapping-tool/service/app/wpml.py, verified with Pilot 2 on RC Pr
   for the web, `MAPPING_AGENT_TOKEN` bearer for the compute agent. Agent API: mapping-tool/docs/agent-api.md.
 - Results in bucket `mapping-results/{jobId}/`, tiles via 302 to presigned URLs (bucket stays private).
 - Test without x64 node: `python3 mapping-tool/service/tools/sim_agent.py`.
+- `compute-agent/` runs on the x64 node (own compose, not in edge/). Stdlib Python + GDAL image, NodeODM only
+  via HTTP. NodeODM /task/new/init must be multipart: an urlencoded body is silently ignored (options lost).
+  GDAL COG/gdal2tiles write temp files into cwd: run them inside the job dir. Full test on the Pi with
+  `compute-agent/tools/fake_nodeodm.py` (takes the OLDEST queued job, park real jobs first).
 - Host ports on the dev Pi: MQTT 1884, MQTT-WS 8084, web 8085 (1883/8083/8080 taken by other services).

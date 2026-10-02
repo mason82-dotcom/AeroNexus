@@ -21,6 +21,7 @@ DJI Pilot 2 auf der Fernsteuerung verbindet sich direkt mit dem eigenen Server, 
 | AeroNexus Photovoltaik Tool | `photovoltaik-tool/` | geplant | Thermografie-Auswertung von PV-Anlagen (M3T / M4T) |
 | AeroNexus Farming Guide | `farming-guide/` | geplant | Multispektral-Auswertung (M3M): NDVI und Applikationskarten |
 | AeroNexus Photogrammetrie Addon | `photogrammetrie-addon/` | geplant | Orthofotos, 3D-Modelle (OpenDroneMap) |
+| AeroNexus Compute-Agent | `compute-agent/` | verfügbar | Rechenknoten (x64, Windows/WSL2 oder Linux): NodeODM, COG, Kacheln für das Mapping Tool |
 | AeroNexus Edge | `edge/` | verfügbar | Installation auf Raspberry Pi 5 / lokalem Server (Docker Compose) |
 
 ## Herkunft des Codes

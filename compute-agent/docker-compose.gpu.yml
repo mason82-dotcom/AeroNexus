@@ -1,0 +1,22 @@
+# GPU override (NVIDIA). The published nodeodm:gpu image is stale and silently falls back to CPU
+# (NodeODM issue #271), so NodeODM 3.6.2 is built from its pinned git commit on top of the pinned
+# odm:3.6.2-gpu image. Needs the NVIDIA driver (Windows) / NVIDIA Container Toolkit (Linux).
+services:
+  nodeodm:
+    build:
+      context: https://github.com/OpenDroneMap/NodeODM.git#d45bc41b0c7a51e7f3796035f3bc238e9e01d0a2
+      dockerfile: Dockerfile.gpu
+      args:
+        FROM_REPO: opendronemap/odm:3.6.2-gpu@sha256:4588fbf8b3574752dce9903345ecfb98d71b20c7834d376a84bfce2f8315ef28
+    image: aeronexus/nodeodm-gpu:3.6.2
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+
+  agent:
+    environment:
+      GPU: "true"
