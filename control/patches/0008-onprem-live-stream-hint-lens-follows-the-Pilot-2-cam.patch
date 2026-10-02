@@ -1,0 +1,34 @@
+From c5b73ebec7a710b9301ef4aefcf5d1dd04cdf8b4 Mon Sep 17 00:00:00 2001
+From: aeronexus <aeronexus@local>
+Date: Fri, 2 Oct 2026 15:45:22 +0200
+Subject: [PATCH] onprem: live stream hint, lens follows the Pilot 2 camera
+ view
+
+Verified with a Mavic 3T on the RC Pro Enterprise: Pilot 2 acknowledges
+live_start_push with video_id .../thermal-0 but keeps streaming the lens shown
+on the remote controller, and does not answer live_lens_change. Switching to
+IR in Pilot 2 switches the stream. Show this as a hint when a camera has more
+than one video instead of offering a lens choice that has no effect.
+---
+ src/components/livestream-others.vue | 5 +++++
+ 1 file changed, 5 insertions(+)
+
+diff --git a/src/components/livestream-others.vue b/src/components/livestream-others.vue
+index 6baad20..198a724 100644
+--- a/src/components/livestream-others.vue
++++ b/src/components/livestream-others.vue
+@@ -92,6 +92,11 @@
+       </a-select>
+     </div>
+     <div class="mt20">
++      <!-- onprem: verified with Mavic 3T on RC Pro: video_id and live_lens_change are ignored by Pilot 2 -->
++      <p class="fz12" v-if="videoList.length > 1">
++        Remote controller (Pilot 2): the stream always shows the lens selected in Pilot 2
++        ({{ videoList.map(v => v.label).join(' / ') }}). Switch the lens on the remote controller.
++      </p>
+       <p class="fz10" v-if="livetypeSelected == 2">
+         Please use VLC media player to play the RTSP livestream !!!
+       </p>
+-- 
+2.47.3
+

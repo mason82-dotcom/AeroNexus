@@ -46,6 +46,7 @@ Bisherige Patches:
 - **control 0005:** Zeichenwerkzeug legt Annotationen nur noch einmal an (vorher bei jedem Werkzeugwechsel mehrfach)
 - **control 0006:** Annotationen landen auch beim Zeichnen ausserhalb der Annotations-Seite in der richtigen Ebene
 - **control 0007:** Seite Mapping: Auftraege, Bildauswahl aus den Medien, Ergebnis-Layer in der Karte
+- **control 0008:** Livestream-Hinweis: beim RC zeigt der Stream das in Pilot 2 gewaehlte Objektiv
 
 ## Schnellstart
 

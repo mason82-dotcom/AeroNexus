@@ -36,6 +36,8 @@ New device = DeviceTypeEnum + DeviceEnum (+ GatewayTypeEnum if it is a gateway/R
   for RTMP; the web maps it to `<VITE_WHEP_BASE>live/<name>/whep` or `<VITE_HLS_BASE>live/<name>/index.m3u8`.
 - WHIP url uses `{stream}` placeholder (backend patch 0002) because MediaMTX expects `/live/<name>/whip`.
 - MediaMTX does not transcode: the browser must decode what the drone sends (H.264).
+- RC (Pilot 2) streams the lens shown on the remote controller; video_id lens and live_lens_change are
+  ignored (verified M3T 2026-10-02). Lens switching from the cloud is Dock-only. Stream: H.264 High 1280x720.
 
 ## Wayline template types
 0 waypoint, 1 mapping2d, 2 mapping3d, 3 mappingStrip, 4 mappingPrism, 5 mappingCylinder.
