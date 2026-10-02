@@ -1,0 +1,43 @@
+# AeroNexus CI: unit tests of the own services, patch series against the pinned upstream commits,
+# and a full image build the way edge/setup.sh + docker compose do it on the Pi (dummy secrets).
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  tests:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1   # v7.0.1
+      - name: Unit tests (mapping, farming, agent)
+        run: edge/run-tests.sh
+
+  build:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1   # v7.0.1
+      - name: Patch series applies to the pinned upstream commits
+        run: edge/verify-patches.sh
+      - name: setup.sh with a throwaway .env
+        working-directory: edge
+        run: |
+          cp .env.example .env
+          sed -i -e 's/^DJI_APP_ID=.*/DJI_APP_ID=123456/' -e 's/^DJI_APP_KEY=.*/DJI_APP_KEY=ci/' \
+                 -e 's/^DJI_APP_LICENSE=.*/DJI_APP_LICENSE=ci/' .env
+          ./setup.sh
+      - name: Build images (backend incl. Java compile, web incl. ESLint, mapping, farming)
+        working-directory: edge
+        run: docker compose build api control mapping farming

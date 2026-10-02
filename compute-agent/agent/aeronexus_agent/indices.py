@@ -52,6 +52,8 @@ def _stats(path: Path) -> dict:
     ds = gdal.Open(str(path))
     band = ds.GetRasterBand(1)
     lo, hi, mean, std = band.ComputeStatistics(False)
+    if hi <= lo:                        # constant raster: GetHistogram needs max > min
+        hi = lo + 1e-6
     buckets = 512
     hist = band.GetHistogram(lo, hi, buckets, include_out_of_range=0, approx_ok=0)
     total = sum(hist)

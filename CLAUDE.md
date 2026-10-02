@@ -28,6 +28,15 @@ Self-hosted drone platform on DJI Cloud API (DJI Pilot 2 -> own server). Monorep
 - Service error `detail` texts shown in the UI are German; agent-facing messages stay English
   (the compute agent matches on "canceled").
 
+## Tests and CI
+- `edge/run-tests.sh [mapping|farming|agent]`: stdlib unittest suites in `<module>/tests/`, run inside the
+  production images (mapping image, pinned GDAL image). No extra test dependencies.
+- GitHub Actions `.github/workflows/ci.yml`: unit tests, `verify-patches.sh`, setup.sh + compose build of
+  api/control/mapping/farming. Actions pinned by commit SHA.
+- Test geodata is generic (10.45,51.16 from .env.example). Never commit real Pilot 2 KMZ or photos (public
+  repo, they reveal the flight site); use AERONEXUS_REAL_KMZ_DIR for local checks against real routes.
+- Changes to wpml.py, isoxml.py, zones.py or indices.py need a test that would have caught the bug.
+
 ## Device model keys (domain-type-subtype)
 | Device | Key |
 |---|---|

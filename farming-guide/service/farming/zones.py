@@ -39,8 +39,12 @@ UNITS = {"kg/ha": ("0006", "Setpoint Mass Per Area Application Rate"),     # DDI
 
 # ------------------------------------------------------------------ storage helpers
 
+def _prefix() -> str:
+    return f"/vsis3/{settings.bucket}/zonemaps"
+
+
 def _key(zid: str, name: str) -> str:
-    return f"/vsis3/{settings.bucket}/zonemaps/{zid}/{name}"
+    return f"{_prefix()}/{zid}/{name}"
 
 
 def _write(path: str, data: bytes) -> None:
@@ -56,6 +60,8 @@ def _read(path: str) -> bytes:
         f = gdal.VSIFOpenL(path, "rb")
     except RuntimeError as exc:
         raise HttpError(404, "Nicht gefunden") from exc
+    if f is None:                       # missing object: GDAL returns NULL here instead of raising
+        raise HttpError(404, "Nicht gefunden")
     try:
         gdal.VSIFSeekL(f, 0, 2)
         size = gdal.VSIFTellL(f)
@@ -102,8 +108,13 @@ def _classify(values: np.ndarray, valid: np.ndarray, classes: int, method: str) 
     return out, [round(float(x), 4) for x in limits]
 
 
+def _index_path(layer: dict) -> str:
+    """Index COG written by the compute agent (mapping-results/<job>/<kind>.tif)."""
+    return f"/vsis3/{settings.results_bucket}/{layer['job_id']}/{layer['kind']}.tif"
+
+
 def compute(layer: dict, classes: int, method: str, cell_m: float, min_area_m2: float) -> tuple[dict, bytes, bytes]:
-    src = f"/vsis3/{settings.results_bucket}/{layer['job_id']}/{layer['kind']}.tif"
+    src = _index_path(layer)
     ds = gdal.Warp("", src, format="MEM", dstSRS=WORK_CRS, xRes=cell_m, yRes=cell_m, resampleAlg="average",
                    srcNodata=NODATA, dstNodata=NODATA, targetAlignedPixels=True)
     values = ds.GetRasterBand(1).ReadAsArray().astype("float32")
@@ -202,8 +213,7 @@ def _public(meta: dict) -> dict:
 
 @route("GET", "/api/farming/zonemaps")
 def list_zonemaps(req, user):
-    prefix = f"/vsis3/{settings.bucket}/zonemaps/"
-    ids = [d.rstrip("/") for d in (gdal.ReadDir(prefix) or [])]
+    ids = [d.rstrip("/") for d in (gdal.ReadDir(_prefix() + "/") or [])]
     out = []
     for zid in ids:
         try:
@@ -230,8 +240,7 @@ def get_geojson(req, user, zid):
 @route("DELETE", "/api/farming/zonemaps/{zid}")
 def delete_zonemap(req, user, zid):
     _meta(zid, user["workspace_id"])
-    prefix = f"/vsis3/{settings.bucket}/zonemaps/{zid}"
-    gdal.RmdirRecursive(prefix)
+    gdal.RmdirRecursive(f"{_prefix()}/{zid}")
     log.info("zone map %s deleted by %s", zid, user.get("username"))
     return {"deleted": zid}
 

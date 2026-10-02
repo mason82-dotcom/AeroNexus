@@ -62,6 +62,12 @@ Bisherige Patches:
 
 Prüfen, ob die Patches vollständig sind und sauber auf die gepinnten Commits passen: `edge/verify-patches.sh`
 
+## Tests
+
+`edge/run-tests.sh` führt die Tests der eigenen Dienste aus (Routenbearbeitung, Zonenkarten und Exporte,
+Index-Berechnung, Anmeldung), jeweils im Docker-Image des Dienstes. GitHub Actions führt bei jedem Push
+zusätzlich die Patch-Prüfung und den kompletten Image-Build aus.
+
 ## Schnellstart
 
 ```bash
