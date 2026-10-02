@@ -1,0 +1,60 @@
+From e75b5c8cd2b61668f4c00b8501c35ad11b84e45c Mon Sep 17 00:00:00 2001
+From: aeronexus <aeronexus@local>
+Date: Fri, 2 Oct 2026 17:08:48 +0200
+Subject: [PATCH] onprem: accept structured service replies where a string is
+ expected
+
+The DJI RC Plus 2 (Matrice 4T) answers live_start_push with
+{"result":0,"output":{"origin_video_id":[]}}. The SDK converted 'output'
+to String and failed, so a successful stream start was reported as an error
+to the web UI. Non-string replies are now kept as JSON text.
+---
+ .../sdk/mqtt/services/ServicesPublish.java    | 21 +++++++++++++++++--
+ 1 file changed, 19 insertions(+), 2 deletions(-)
+
+diff --git a/cloud-sdk/src/main/java/com/dji/sdk/mqtt/services/ServicesPublish.java b/cloud-sdk/src/main/java/com/dji/sdk/mqtt/services/ServicesPublish.java
+index a07ec02..6133d52 100644
+--- a/cloud-sdk/src/main/java/com/dji/sdk/mqtt/services/ServicesPublish.java
++++ b/cloud-sdk/src/main/java/com/dji/sdk/mqtt/services/ServicesPublish.java
+@@ -3,6 +3,7 @@ package com.dji.sdk.mqtt.services;
+ import com.dji.sdk.common.Common;
+ import com.dji.sdk.mqtt.MqttGatewayPublish;
+ import com.dji.sdk.mqtt.TopicConst;
++import com.fasterxml.jackson.core.JsonProcessingException;
+ import com.fasterxml.jackson.core.type.TypeReference;
+ import com.fasterxml.jackson.databind.ObjectMapper;
+ import org.springframework.stereotype.Component;
+@@ -98,12 +99,28 @@ public class ServicesPublish {
+         // put together in "output"
+         ObjectMapper mapper = Common.getObjectMapper();
+         if (Objects.nonNull(replyReceiver.getInfo())) {
+-            reply.setOutput(mapper.convertValue(replyReceiver.getInfo(), clazz));
++            reply.setOutput(convertReply(mapper, replyReceiver.getInfo(), clazz));
+         }
+         if (Objects.nonNull(replyReceiver.getOutput())) {
+-            reply.setOutput(mapper.convertValue(replyReceiver.getOutput(), clazz));
++            reply.setOutput(convertReply(mapper, replyReceiver.getOutput(), clazz));
+         }
+         return response.setData(reply);
+     }
+ 
++    /**
++     * onprem: newer gateways send structured data where the SDK expects a string, e.g. the
++     * DJI RC Plus 2 answers live_start_push with "output": {"origin_video_id": []}. Keep it as JSON
++     * text instead of failing the whole (successful) service call.
++     */
++    private <T> T convertReply(ObjectMapper mapper, Object value, TypeReference<T> clazz) {
++        if (String.class.equals(clazz.getType()) && !(value instanceof String)) {
++            try {
++                return (T) mapper.writeValueAsString(value);
++            } catch (JsonProcessingException e) {
++                return (T) String.valueOf(value);
++            }
++        }
++        return mapper.convertValue(value, clazz);
++    }
++
+ }
+-- 
+2.47.3
+
