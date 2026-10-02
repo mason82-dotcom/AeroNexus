@@ -12,9 +12,10 @@ from fastapi.responses import RedirectResponse
 from . import db
 from .auth import User, agent_dependency, tile_user_dependency, user_dependency
 from .config import Settings
-from .models import PROFILES, Claim, Complete, Fail, Heartbeat, JobCreate, RouteCopy, UploadUrls, AgentRef
+from .models import PROFILES, MetaRequest, Claim, Complete, Fail, Heartbeat, JobCreate, RouteCopy, UploadUrls, AgentRef
 from .storage import Storage
-from . import thumbs, wpml
+from . import mediameta, thumbs, wpml
+from concurrent.futures import ThreadPoolExecutor
 
 log = logging.getLogger("mapping.api")
 
@@ -117,6 +118,68 @@ def build_router(settings: Settings, storage: Storage) -> APIRouter:
         return {"total": total, "page": page, "page_size": page_size, "list": [
             {**r, "is_original": bool(r["is_original"]),
              "create_time": _iso(datetime.fromtimestamp(r["create_time"] / 1000, tz=timezone.utc).replace(tzinfo=None))} for r in rows]}
+
+    def read_meta(row: dict) -> dict:
+        """EXIF/XMP from the first 256 KB (range read); whole file only if the head is not enough."""
+        stat = storage.internal.stat_object(settings.media_bucket, row["object_key"])
+        resp = storage.internal.get_object(settings.media_bucket, row["object_key"], offset=0,
+                                           length=min(mediameta.HEAD_BYTES, stat.size))
+        try:
+            head = resp.read()
+        finally:
+            resp.close()
+            resp.release_conn()
+        try:
+            meta = mediameta.extract(head, stat.size)
+        except Exception:
+            meta = None
+        if meta is None or meta["width"] is None or meta["captured"] is None:
+            resp = storage.internal.get_object(settings.media_bucket, row["object_key"])
+            try:
+                meta = mediameta.extract(resp.read(), stat.size)
+            finally:
+                resp.close()
+                resp.release_conn()
+        return meta
+
+    @router.post("/media/meta")
+    def media_meta(body: MetaRequest, user: User = Depends(current_user)) -> dict:
+        """Photo parameters for up to 200 media files; extracted once, then served from the database."""
+        ids = list(dict.fromkeys(body.file_ids))
+        marks = ",".join(["%s"] * len(ids))
+        with db.transaction(settings) as cur:
+            cur.execute(f"SELECT file_id, meta FROM media_meta WHERE workspace_id = %s AND file_id IN ({marks})",
+                        [user.workspace_id, *ids])
+            result = {r["file_id"]: json.loads(r["meta"]) for r in cur.fetchall()}
+        missing = [i for i in ids if i not in result]
+        if missing:
+            conn = db.connect(settings, settings.media_database)
+            try:
+                with conn.cursor() as cur:
+                    marks = ",".join(["%s"] * len(missing))
+                    cur.execute(f"SELECT file_id, file_name, object_key FROM media_file"
+                                f" WHERE workspace_id = %s AND file_id IN ({marks})", [user.workspace_id, *missing])
+                    rows = [r for r in cur.fetchall() if thumbs.supported(r["file_name"])]
+            finally:
+                conn.close()
+
+            def one(row: dict):
+                try:
+                    return row["file_id"], read_meta(row)
+                except Exception as exc:
+                    log.warning("metadata of %s not readable: %s", row["file_name"], exc)
+                    return row["file_id"], {"error": "not readable"}
+
+            with ThreadPoolExecutor(4) as pool:
+                extracted = dict(pool.map(one, rows))
+            if extracted:
+                with db.transaction(settings) as cur:
+                    cur.executemany(
+                        "INSERT INTO media_meta (file_id, workspace_id, meta) VALUES (%s, %s, %s)"
+                        " ON DUPLICATE KEY UPDATE meta = VALUES(meta), extracted_at = UTC_TIMESTAMP(3)",
+                        [(fid, user.workspace_id, json.dumps(m)) for fid, m in extracted.items()])
+            result.update(extracted)
+        return {fid: result.get(fid) for fid in ids}
 
     @router.get("/media/{file_id}/thumbnail.jpg")
     def media_thumbnail(file_id: str, user: User = Depends(tile_user)):

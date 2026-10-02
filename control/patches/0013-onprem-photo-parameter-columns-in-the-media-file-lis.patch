@@ -1,0 +1,182 @@
+From d99299fa865c5e9986c6915746a4e7b278b4f820 Mon Sep 17 00:00:00 2001
+From: aeronexus <aeronexus@local>
+Date: Fri, 2 Oct 2026 18:11:28 +0200
+Subject: [PATCH] onprem: photo parameter columns in the media file list
+
+Captured time, camera/resolution/exposure, GNSS status + heights, gimbal and
+laser range, file size; read from EXIF/DJI XMP by the mapping service.
+---
+ src/api/mapping.ts            | 31 ++++++++++++++
+ src/components/MediaPanel.vue | 79 ++++++++++++++++++++++++++++++++++-
+ 2 files changed, 108 insertions(+), 2 deletions(-)
+
+diff --git a/src/api/mapping.ts b/src/api/mapping.ts
+index d23214d..b7d5587 100644
+--- a/src/api/mapping.ts
++++ b/src/api/mapping.ts
+@@ -90,6 +90,37 @@ export async function getMappingLayers (): Promise<MappingLayer[]> {
+   return (await http.get('/api/mapping/layers')).data
+ }
+ 
++export interface MediaMeta {
++  captured: string | null // local camera time, ISO without zone
++  model: string | null
++  width: number | null
++  height: number | null
++  exposure_time: number | null
++  f_number: number | null
++  iso: number | null
++  focal_mm: number | null
++  focal_35mm: number | null
++  shutter: string | null
++  gps_status: string | null
++  lat: number | null
++  lon: number | null
++  abs_alt: number | null
++  rel_alt: number | null
++  altitude_type: string | null
++  rtk_std_m: number | null
++  gimbal_pitch: number | null
++  gimbal_yaw: number | null
++  flight_yaw: number | null
++  lrf_distance: number | null
++  size_bytes: number | null
++  error?: string
++}
++
++export async function getMediaMeta (fileIds: string[]): Promise<Record<string, MediaMeta | null>> {
++  if (!fileIds.length) return {}
++  return (await http.post('/api/mapping/media/meta', { file_ids: fileIds.slice(0, 200) })).data
++}
++
+ // Leaflet loads tiles via <img>, so the token goes into the query string
+ export function layerTileUrl (layer: MappingLayer): string {
+   return mappingBase() + layer.tile_url + '?token=' + encodeURIComponent(authToken())
+diff --git a/src/components/MediaPanel.vue b/src/components/MediaPanel.vue
+index a984add..ef3804a 100644
+--- a/src/components/MediaPanel.vue
++++ b/src/components/MediaPanel.vue
+@@ -15,6 +15,29 @@
+                :src="thumbnailUrl(record.file_id)" />
+           <VideoCameraOutlined v-else-if="/\.(mp4|mov)$/i.test(record.file_name)" class="fz20" />
+         </template>
++        <template #captured="{ record }">{{ record.meta?.captured ? record.meta.captured.replace('T', ' ') : '' }}</template>
++        <template #camera="{ record }">
++          <template v-if="record.meta && !record.meta.error">
++            <div>{{ record.meta.model }} <span class="dim">{{ megapixel(record.meta) }}</span></div>
++            <div class="dim">{{ exposure(record.meta) }}</div>
++          </template>
++        </template>
++        <template #position="{ record }">
++          <template v-if="record.meta && !record.meta.error">
++            <a-tooltip :title="record.meta.lat !== null ? `${record.meta.lat.toFixed(7)}, ${record.meta.lon.toFixed(7)}` : 'no valid GNSS position'">
++              <a-tag :color="gnssColor(record.meta.gps_status)">{{ record.meta.gps_status || '-' }}</a-tag>
++            </a-tooltip>
++            <span v-if="record.meta.rtk_std_m !== null" class="dim">&#177;{{ record.meta.rtk_std_m }} m</span>
++            <div class="dim">rel {{ fixed(record.meta.rel_alt, 1) }} m &#183; abs {{ fixed(record.meta.abs_alt, 1) }} m</div>
++          </template>
++        </template>
++        <template #gimbal="{ record }">
++          <template v-if="record.meta && !record.meta.error">
++            <div>{{ fixed(record.meta.gimbal_pitch, 1) }}&#176; / {{ fixed(record.meta.gimbal_yaw, 1) }}&#176;</div>
++            <div v-if="record.meta.lrf_distance" class="dim">LRF {{ fixed(record.meta.lrf_distance, 1) }} m</div>
++          </template>
++        </template>
++        <template #size="{ record }">{{ record.meta?.size_bytes ? (record.meta.size_bytes / 1048576).toFixed(1) + ' MB' : '' }}</template>
+         <template #original="{ text }">
+           {{ text }}
+         </template>
+@@ -37,7 +60,27 @@ import { ELocalStorageKey } from '../types/enums'
+ import { downloadFile } from '../utils/common'
+ import { downloadMediaFile, getMediaFiles } from '/@/api/media'
+ import { DownloadOutlined, VideoCameraOutlined } from '@ant-design/icons-vue'
+-import { authToken, mappingBase } from '/@/api/mapping'
++import { MediaMeta, authToken, getMediaMeta, mappingBase } from '/@/api/mapping'
++
++// onprem: photo parameters (EXIF + DJI XMP) from the mapping service
++function fixed (v: number | null | undefined, digits: number): string {
++  return v === null || v === undefined ? '-' : v.toFixed(digits)
++}
++function megapixel (m: MediaMeta): string {
++  return m.width && m.height ? `${m.width}x${m.height} (${(m.width * m.height / 1e6).toFixed(1)} MP)` : ''
++}
++function exposure (m: MediaMeta): string {
++  const parts: string[] = []
++  if (m.exposure_time) parts.push(m.exposure_time >= 1 ? `${m.exposure_time} s` : `1/${Math.round(1 / m.exposure_time)} s`)
++  if (m.f_number) parts.push(`f/${m.f_number}`)
++  if (m.iso) parts.push(`ISO ${m.iso}`)
++  if (m.focal_35mm) parts.push(`${m.focal_35mm} mm`)
++  if (m.shutter) parts.push(m.shutter === 'Mechanical' ? 'mech.' : 'elec.')
++  return parts.join(' \u00b7 ')
++}
++function gnssColor (status: string | null): string {
++  return status === 'RTK' ? 'green' : (status === 'Invalid' || !status ? 'default' : 'blue')
++}
+ 
+ // onprem: thumbnails are rendered and cached by the mapping service (JPEG incl. thermal, 16-bit TIF)
+ function hasThumbnail (fileName: string): boolean {
+@@ -81,6 +124,31 @@ const columns = [
+     title: 'Payload Type',
+     dataIndex: 'payload'
+   },
++  {
++    title: 'Captured',
++    width: 160,
++    slots: { customRender: 'captured' }
++  },
++  {
++    title: 'Camera / Exposure',
++    width: 230,
++    slots: { customRender: 'camera' }
++  },
++  {
++    title: 'Position (GNSS, height)',
++    width: 200,
++    slots: { customRender: 'position' }
++  },
++  {
++    title: 'Gimbal pitch / yaw',
++    width: 140,
++    slots: { customRender: 'gimbal' }
++  },
++  {
++    title: 'Size',
++    width: 80,
++    slots: { customRender: 'size' }
++  },
+   {
+     title: 'Original',
+     dataIndex: 'is_original',
+@@ -120,6 +188,7 @@ interface MediaFile {
+   file_path: string,
+   create_time: string,
+   file_id: string,
++  meta?: MediaMeta | null,
+ }
+ 
+ const mediaData = reactive({
+@@ -135,7 +204,9 @@ function getFiles () {
+     mediaData.data = res.data.list
+     paginationProp.total = res.data.pagination.total
+     paginationProp.current = res.data.pagination.page
+-    console.info(mediaData.data[0])
++    getMediaMeta(mediaData.data.map((m: MediaFile) => m.file_id)).then(meta => {
++      mediaData.data = mediaData.data.map((m: MediaFile) => ({ ...m, meta: meta[m.file_id] }))
++    }).catch(() => message.warning('Photo parameters not available (mapping service not reachable)'))
+   })
+ }
+ 
+@@ -164,6 +235,10 @@ function downloadMedia (media: MediaFile) {
+ .media-panel-wrapper {
+   width: 100%;
+   padding: 16px;
++  .dim {
++    color: hsla(0, 0%, 100%, 0.55);
++    font-size: 12px;
++  }
+   .thumb {
+     width: 96px;
+     height: 72px;
+-- 
+2.47.3
+

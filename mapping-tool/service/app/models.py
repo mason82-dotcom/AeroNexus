@@ -36,6 +36,10 @@ class JobCreate(BaseModel):
         return keys
 
 
+class MetaRequest(BaseModel):
+    file_ids: list[str] = Field(min_length=1, max_length=200)
+
+
 class AgentRef(BaseModel):
     agent_id: str
 
