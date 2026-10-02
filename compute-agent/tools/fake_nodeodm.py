@@ -77,7 +77,8 @@ def build_result(task: dict, lon: float, lat: float) -> Path:
     d = WORK / task["uuid"]
     first = sorted(d.glob("img_*"))[0]
     cx, cy = utm_of(lon, lat)
-    w, h = 80.0, 60.0                                  # metres on the ground
+    # metres on the ground: a realistic field for multispectral, small scene for the RGB test image
+    w, h = (300.0, 200.0) if MULTISPECTRAL else (80.0, 60.0)
     ortho_dir, dem_dir = d / "odm_orthophoto", d / "odm_dem"
     ortho_dir.mkdir(exist_ok=True)
     dem_dir.mkdir(exist_ok=True)
