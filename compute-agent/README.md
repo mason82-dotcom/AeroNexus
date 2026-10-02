@@ -15,6 +15,8 @@ unter Mapping. Schnittstelle: `mapping-tool/docs/agent-api.md`, Architektur: `ma
 | NodeODM / ODM (CPU) | `opendronemap/nodeodm:3.6.2@sha256:fcd99eb2...` | AGPL-3.0, unveraendert |
 | NodeODM / ODM (GPU) | gebaut aus NodeODM-Commit `d45bc41` (v3.6.2) auf `odm:3.6.2-gpu@sha256:4588fbf8...` | AGPL-3.0, unveraendert |
 
+**Ausfuehrliche Schritt-fuer-Schritt-Anleitung fuer Windows/WSL2: [`docs/setup-windows-wsl.md`](docs/setup-windows-wsl.md)**
+
 ## Voraussetzungen (Windows mit WSL2)
 
 1. **Docker Desktop** mit WSL2-Backend, unter Einstellungen "Start Docker Desktop when you sign in" aktivieren.
