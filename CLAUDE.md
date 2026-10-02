@@ -78,6 +78,8 @@ Editing routes (mapping-tool/service/app/wpml.py, verified with Pilot 2 on RC Pr
   for the web, `MAPPING_AGENT_TOKEN` bearer for the compute agent. Agent API: mapping-tool/docs/agent-api.md.
 - Results in bucket `mapping-results/{jobId}/`, tiles via 302 to presigned URLs (bucket stays private).
 - Test without x64 node: `python3 mapping-tool/service/tools/sim_agent.py`.
+- All simulated test geodata stays within 10 km of HOME_POINT (edge/.env, "lon,lat"); sim_agent.py and
+  fake_nodeodm.py refuse other positions.
 - `compute-agent/` runs on the x64 node (own compose, not in edge/). Stdlib Python + GDAL image, NodeODM only
   via HTTP. NodeODM /task/new/init must be multipart: an urlencoded body is silently ignored (options lost).
   GDAL COG/gdal2tiles write temp files into cwd: run them inside the job dir. Full test on the Pi with

@@ -5,8 +5,8 @@ Steps: create job (web login) -> claim with short lease -> heartbeat -> let the 
 check 409 + requeue -> claim again -> upload generated test tiles + manifest -> complete ->
 check layer and a tile via the tile redirect.
 
-Standard library only. Reads edge/.env. Usage:
-  python3 mapping-tool/service/tools/sim_agent.py [--lease 15] [--lon 8.5905 --lat 49.1575]
+Standard library only. Reads edge/.env; test tiles are placed at HOME_POINT (max. 10 km away). Usage:
+  python3 mapping-tool/service/tools/sim_agent.py [--lease 15] [--lon <lon> --lat <lat>]
 """
 import argparse
 import hashlib
@@ -71,6 +71,12 @@ def png_rgba(size: int, rgba: tuple, border: tuple) -> bytes:
             + chunk(b"IDAT", zlib.compress(b"".join(rows), 9)) + chunk(b"IEND", b""))
 
 
+def distance_km(lon1: float, lat1: float, lon2: float, lat2: float) -> float:
+    p1, p2 = math.radians(lat1), math.radians(lat2)
+    a = math.sin((p2 - p1) / 2) ** 2 + math.cos(p1) * math.cos(p2) * math.sin(math.radians(lon2 - lon1) / 2) ** 2
+    return 6371.0 * 2 * math.asin(math.sqrt(a))
+
+
 def tile_xy(lon: float, lat: float, z: int) -> tuple[int, int]:
     n = 2 ** z
     x = int((lon + 180) / 360 * n)
@@ -100,12 +106,17 @@ def check(cond: bool, msg: str):
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--lease", type=int, default=15, help="lease seconds of the first claim (>= 10)")
-    ap.add_argument("--lon", type=float, default=8.5905)
-    ap.add_argument("--lat", type=float, default=49.1575)
+    ap.add_argument("--lon", type=float, default=None, help="default: HOME_POINT from edge/.env")
+    ap.add_argument("--lat", type=float, default=None, help="default: HOME_POINT from edge/.env")
     ap.add_argument("--images", type=int, default=2, help="number of RGB images for the job")
     args = ap.parse_args()
 
     env = load_env()
+    home_lon, home_lat = (float(v) for v in env["HOME_POINT"].split(","))
+    args.lon = home_lon if args.lon is None else args.lon
+    args.lat = home_lat if args.lat is None else args.lat
+    if distance_km(home_lon, home_lat, args.lon, args.lat) > 10:
+        sys.exit(f"test position {args.lon},{args.lat} is more than 10 km from HOME_POINT {home_lon},{home_lat}")
     host = env["SERVER_HOST"]
     base = f"http://{host}:6790/api/mapping"
     agent_hdr = {"Authorization": f"Bearer {env['MAPPING_AGENT_TOKEN']}"}

@@ -5,9 +5,11 @@ Implements the NodeODM v2 calls the agent uses. 'Processing' takes a few polls; 
 contains the first uploaded image georeferenced as an orthophoto (EPSG:32632, ~0.1 m/px) at the
 given position, plus a float DSM derived from it.
 
-  python3 fake_nodeodm.py --port 3001 --token testtoken --lon 8.5898 --lat 49.1574 [--multispectral]
+  HOME_POINT=<lon>,<lat> python3 fake_nodeodm.py --port 3001 --token testtoken [--multispectral]
 """
 import argparse
+import math
+import os
 import cgi
 import json
 import subprocess
@@ -181,10 +183,19 @@ if __name__ == "__main__":
     ap = argparse.ArgumentParser()
     ap.add_argument("--port", type=int, default=3001)
     ap.add_argument("--token", default="testtoken")
-    ap.add_argument("--lon", type=float, default=8.5898)
-    ap.add_argument("--lat", type=float, default=49.1574)
+    ap.add_argument("--lon", type=float, default=None, help="default: HOME_POINT environment variable (lon,lat)")
+    ap.add_argument("--lat", type=float, default=None)
     ap.add_argument("--multispectral", action="store_true", help="return a synthetic Mavic 3M 5-band orthophoto")
     a = ap.parse_args()
+    if not os.environ.get("HOME_POINT"):
+        raise SystemExit("HOME_POINT (lon,lat) is required: test geodata must stay within 10 km of it")
+    home_lon, home_lat = (float(v) for v in os.environ["HOME_POINT"].split(","))
+    a.lon = home_lon if a.lon is None else a.lon
+    a.lat = home_lat if a.lat is None else a.lat
+    dlat = math.radians(a.lat - home_lat)
+    dlon = math.radians(a.lon - home_lon) * math.cos(math.radians(home_lat))
+    if 6371.0 * math.hypot(dlat, dlon) > 10:
+        raise SystemExit(f"position {a.lon},{a.lat} is more than 10 km from HOME_POINT")
     MULTISPECTRAL = a.multispectral
     srv = ThreadingHTTPServer(("0.0.0.0", a.port), Handler)
     srv.token, srv.lon, srv.lat = a.token, a.lon, a.lat

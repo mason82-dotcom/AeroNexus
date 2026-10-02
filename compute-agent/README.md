@@ -87,7 +87,7 @@ Nach einem Auftrag steht im Agent-Log `gpu_sift=True`, wenn ODM die Merkmalsextr
 laesst sich der ganze Ablauf (Auftrag, Download, GDAL, Upload, Layer) auch auf dem Pi pruefen:
 
 ```bash
-docker run -d --rm --name fake-nodeodm --network host -v "$PWD/tools:/tools:ro" \
+docker run -d --rm --name fake-nodeodm --network host -v "$PWD/tools:/tools:ro" -e HOME_POINT=<lon>,<lat> \
   aeronexus/compute-agent:local python3 -W ignore /tools/fake_nodeodm.py --port 3001 --token testtoken
 docker run --rm --network host -e PI_URL=http://<pi>:6790 -e MAPPING_AGENT_TOKEN=... \
   -e NODEODM_URL=http://127.0.0.1:3001 -e NODEODM_TOKEN=testtoken aeronexus/compute-agent:local
