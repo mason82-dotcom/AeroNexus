@@ -120,6 +120,10 @@ Weitere Wege zum selben Stream:
   deshalb auch im Dashboard nachziehen (oder `data/emqx` löschen und neu starten).
 - **RC Plus 2 erscheint nicht, im Log `CloudSDKException ... DeviceEnum`:** Patch nicht angewendet.
   `runtime/upstream/` löschen und `./setup.sh` neu ausführen.
+- **Fotos werden nicht hochgeladen, obwohl Auto-Upload an ist:** Nach einem Drohnenwechsel am selben RC kann die
+  Upload-Warteschlange von Pilot 2 haengen (im Zugriffsprotokoll `edge/logs/access_log.*` nur `POST .../sts`,
+  kein `fast-upload`). Pilot 2 komplett beenden und neu starten, danach laedt er die Fotos hoch
+  (beobachtet mit Mavic 3E am RC Pro Enterprise, 02.10.2026).
 - **Medien-Upload schlägt fehl:** `minio-init` muss mit Exit 0 enden (`docker compose logs minio-init`);
   `SERVER_HOST:9000` muss vom Controller aus erreichbar sein.
 - **SQL-Änderungen greifen nicht:** MySQL war schon initialisiert. Dann `runtime/initdb/02_*.sql` und `03_*.sql`
