@@ -1,0 +1,83 @@
+From 8a33fbbabc01d1fa40443316b9ed7991d16c05f7 Mon Sep 17 00:00:00 2001
+From: aeronexus <aeronexus@local>
+Date: Fri, 2 Oct 2026 17:58:38 +0200
+Subject: [PATCH] onprem: acknowledge AI alert records of Pilot 2 on the RC
+ Plus 2
+
+Pilot 2 (Matrice 4T, RC Plus 2) posts to the FlightHub 2 endpoint
+/drc/api/v2/projects/{id}/ai-alert-record/media after every photo and got 404.
+Observed body: '{}'. The endpoint now acknowledges it; non-empty records
+(future AI detections) are logged for analysis.
+---
+ .../controller/AiAlertRecordController.java   | 59 +++++++++++++++++++
+ 1 file changed, 59 insertions(+)
+ create mode 100644 sample/src/main/java/com/dji/sample/manage/controller/AiAlertRecordController.java
+
+diff --git a/sample/src/main/java/com/dji/sample/manage/controller/AiAlertRecordController.java b/sample/src/main/java/com/dji/sample/manage/controller/AiAlertRecordController.java
+new file mode 100644
+index 0000000..9a115f8
+--- /dev/null
++++ b/sample/src/main/java/com/dji/sample/manage/controller/AiAlertRecordController.java
+@@ -0,0 +1,59 @@
++package com.dji.sample.manage.controller;
++
++import com.dji.sdk.common.HttpResultResponse;
++import lombok.extern.slf4j.Slf4j;
++import org.springframework.web.bind.annotation.PathVariable;
++import org.springframework.web.bind.annotation.PostMapping;
++import org.springframework.web.bind.annotation.RestController;
++
++import javax.servlet.ServletException;
++import javax.servlet.http.HttpServletRequest;
++import javax.servlet.http.Part;
++import java.io.IOException;
++import java.nio.charset.StandardCharsets;
++
++/**
++ * onprem: Pilot 2 on the DJI RC Plus 2 (Matrice 4) posts AI alert records after each photo to an endpoint of
++ * DJI FlightHub 2 that the Cloud API demo does not have (it answered 404). The format is undocumented.
++ * Observed 2026-10-02 (Matrice 4T, RC Plus 2): every request carries just "{}". The endpoint acknowledges it;
++ * empty records are logged at debug level, anything with content at info (text truncated, files only by
++ * name/type/size) so a future Pilot version sending real AI detections gets noticed.
++ */
++@Slf4j
++@RestController
++public class AiAlertRecordController {
++
++    private static final int MAX_LOGGED_CHARS = 2000;
++
++    @PostMapping("/drc/api/v2/projects/{project_id}/ai-alert-record/media")
++    public HttpResultResponse<Object> aiAlertRecordMedia(@PathVariable("project_id") String projectId,
++                                                         HttpServletRequest request) throws IOException, ServletException {
++        String contentType = request.getContentType();
++        if (contentType != null && contentType.startsWith("multipart/")) {
++            for (Part part : request.getParts()) {
++                if (part.getSubmittedFileName() != null) {
++                    log.info("ai-alert-record/media project={} part={} file={} type={} size={}", projectId,
++                            part.getName(), part.getSubmittedFileName(), part.getContentType(), part.getSize());
++                } else {
++                    log.info("ai-alert-record/media project={} part={} value={}", projectId, part.getName(),
++                            truncate(new String(part.getInputStream().readNBytes(MAX_LOGGED_CHARS), StandardCharsets.UTF_8)));
++                }
++            }
++        } else {
++            byte[] body = request.getInputStream().readNBytes(64 * 1024);
++            String text = new String(body, StandardCharsets.UTF_8).trim();
++            if (text.isEmpty() || "{}".equals(text)) {
++                log.debug("ai-alert-record/media project={} empty record", projectId);
++                return HttpResultResponse.success();
++            }
++            log.info("ai-alert-record/media project={} type={} bytes={} body={}", projectId, contentType, body.length,
++                    truncate(new String(body, StandardCharsets.UTF_8)));
++        }
++        return HttpResultResponse.success();
++    }
++
++    private static String truncate(String text) {
++        String oneLine = text.replaceAll("[\\r\\n]+", " ");
++        return oneLine.length() <= MAX_LOGGED_CHARS ? oneLine : oneLine.substring(0, MAX_LOGGED_CHARS) + "...";
++    }
++}
+-- 
+2.47.3
+
