@@ -42,6 +42,11 @@ New device = DeviceTypeEnum + DeviceEnum (+ GatewayTypeEnum if it is a gateway/R
 ## Wayline template types
 0 waypoint, 1 mapping2d, 2 mapping3d, 3 mappingStrip, 4 mappingPrism, 5 mappingCylinder.
 4/5 are not in the public WPML docs; verified 2026-10-01 against KMZ files synced by Pilot 2 (patch api 0006).
+Editing routes (mapping-tool/service/app/wpml.py, verified with Pilot 2 on RC Pro 2026-10-02):
+- Pilot 2 rejects a KMZ without waylines.wpml ("route file deleted"). For mapping2d it recomputes the
+  route from template.kml, so the original waylines.wpml is kept as placeholder.
+- Never re-serialize template.kml (ElementTree): Pilot 2 then read the polygon lat/lon swapped (route
+  in Somalia). Edit values as text only, keep declaration, indentation and number style.
 
 ## Build notes
 - Backend: Java 11 target, Spring Boot 2.7.12. Lombok forced to 1.18.36 (`-Dlombok.version`).

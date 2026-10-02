@@ -1,10 +1,10 @@
 """Read and edit DJI WPML route files (KMZ = wpmz/template.kml + wpmz/waylines.wpml).
 
-Only mapping2d templates are edited (polygon + a few parameters). The edited copy contains
-template.kml only: Pilot 2 computes the executable route from the template (DJI recommendation,
-see docs/AeroNexus_Mapping_Studie.md). Unknown elements are kept untouched.
+Only mapping2d templates are edited (polygon + a few parameters), as text, so everything else
+stays byte-identical to what Pilot 2 wrote. See edit_copy for the Pilot 2 findings.
 """
 import io
+import re
 import time
 import xml.etree.ElementTree as ET
 import zipfile
@@ -111,27 +111,37 @@ def parse(kmz: bytes) -> Route:
     return Route(template_type=template_type, wpml_ns=ns, polygon=polygon, params=params, flight_path=path)
 
 
-def _set(root: ET.Element, ns: str, name: str, value: str) -> bool:
-    found = False
-    for el in root.iter(f"{{{ns}}}{name}"):
-        el.text = value
-        found = True
-    return found
-
-
 def _fmt(value: float, digits: int = 6) -> str:
     return f"{value:.{digits}f}".rstrip("0").rstrip(".")
 
 
-def _set_if_changed(root: ET.Element, ns: str, name: str, value: float, digits: int = 6) -> None:
-    """Only touch elements whose value really changes, so the copy stays as close to Pilot 2's file as possible."""
-    old = _num(root, ns, name)
-    if old is None or abs(old - value) >= 0.5 * 10 ** -digits:
-        _set(root, ns, name, _fmt(value, digits))
+def _wpml_prefix(text: str, ns: str) -> str:
+    m = re.search(r'xmlns:([A-Za-z_][\w.-]*)="' + re.escape(ns) + '"', text)
+    if not m:
+        raise WpmlError("wpml namespace prefix not found")
+    return m.group(1)
+
+
+def _replace_value(text: str, prefix: str, name: str, value: str) -> str:
+    pattern = re.compile(rf"(<{prefix}:{name}>)([^<]*)(</{prefix}:{name}>)")
+    return pattern.sub(lambda m: m.group(1) + value + m.group(3), text)
+
+
+def _replace_if_changed(text: str, prefix: str, name: str, old: float | None, value: float, digits: int) -> str:
+    if old is not None and abs(old - value) < 0.5 * 10 ** -digits:
+        return text
+    return _replace_value(text, prefix, name, _fmt(value, digits))
 
 
 def edit_copy(kmz: bytes, polygon: list[list[float]], params: dict) -> bytes:
-    """Return a new KMZ with only template.kml, polygon and params replaced."""
+    """Return a new KMZ with polygon and params replaced in template.kml.
+
+    Pilot 2 is picky about the file layout (a re-serialized template made it read the polygon as
+    lat/lon swapped). So the template is edited as text: only the values change, declaration,
+    indentation, element order and number style stay exactly as Pilot 2 wrote them.
+    waylines.wpml is kept: Pilot 2 refuses a KMZ without it ("route file deleted") and recomputes
+    the executable route from the template when it opens a mapping2d route.
+    """
     files = _read_zip(kmz)
     raw = files.get(TEMPLATE)
     if raw is None:
@@ -141,43 +151,59 @@ def edit_copy(kmz: bytes, polygon: list[list[float]], params: dict) -> bytes:
     ttype = _find(root, ns, "templateType")
     if ttype is None or (ttype.text or "").strip() not in EDITABLE_TYPES:
         raise WpmlError("only mapping2d routes can be edited")
+    text = raw.decode("utf-8")
+    prefix = _wpml_prefix(text, ns)
 
-    coords_el, _ = _polygon(root)
-    if coords_el is None:
+    # polygon: the <coordinates> block inside <Polygon>
+    poly_at = text.find("<Polygon>")
+    start = text.find("<coordinates>", poly_at)
+    end = text.find("</coordinates>", start)
+    if poly_at < 0 or start < 0 or end < 0:
         raise WpmlError("template has no polygon")
-    tokens = coords_el.text.split()
-    closed = len(tokens) > 1 and tokens[0] == tokens[-1]   # keep Pilot 2's ring convention
+    inner = text[start + len("<coordinates>"):end]
+    tokens = inner.split()
+    closed = len(tokens) > 1 and tokens[0] == tokens[-1]
+    first = next((line for line in inner.splitlines() if line.strip()), "")
+    indent = first[: len(first) - len(first.lstrip())]
+    tail = inner[inner.rfind("\n"):] if "\n" in inner else ""
+    alt = tokens[0].split(",")[2] if tokens and tokens[0].count(",") >= 2 else "0"
     ring = polygon + [polygon[0]] if closed else polygon
-    coords_el.text = "\n" + "\n".join(f"{_fmt(lon, 10)},{_fmt(lat, 10)},0" for lon, lat in ring) + "\n"
+    lines = "\n".join(f"{indent}{lon:.15g},{lat:.15g},{alt}" for lon, lat in ring)
+    text = text[: start + len("<coordinates>")] + "\n" + lines + tail + text[end:]
 
     old_height = _num(root, ns, "globalShootHeight") or _num(root, ns, "height")
     new_height = params["height"]
     if old_height is None or abs(old_height - new_height) > 1e-3:
         for name in ("globalShootHeight", "height", "surfaceRelativeHeight"):
-            if _find(root, ns, name) is not None:
-                _set(root, ns, name, _fmt(new_height))
-        # ellipsoid height keeps its offset to the shooting height
+            text = _replace_value(text, prefix, name, _fmt(new_height))
         ellipsoid = _num(root, ns, "ellipsoidHeight")
         if ellipsoid is not None and old_height is not None:
-            _set(root, ns, "ellipsoidHeight", _fmt(ellipsoid + new_height - old_height))
-    _set_if_changed(root, ns, "direction", params["direction"], 0)
-    _set_if_changed(root, ns, "margin", params["margin"], 0)
+            text = _replace_value(text, prefix, "ellipsoidHeight", _fmt(ellipsoid + new_height - old_height))
+    text = _replace_if_changed(text, prefix, "direction", _num(root, ns, "direction"), params["direction"], 0)
+    text = _replace_if_changed(text, prefix, "margin", _num(root, ns, "margin"), params["margin"], 0)
     for name, key in (("orthoCameraOverlapH", "overlap_h"), ("orthoCameraOverlapW", "overlap_w"),
                       ("orthoLidarOverlapH", "overlap_h"), ("orthoLidarOverlapW", "overlap_w")):
-        _set_if_changed(root, ns, name, params[key], 0)
-    _set_if_changed(root, ns, "autoFlightSpeed", params["speed"], 3)
+        text = _replace_if_changed(text, prefix, name, _num(root, ns, name), params[key], 0)
+    text = _replace_if_changed(text, prefix, "autoFlightSpeed", _num(root, ns, "autoFlightSpeed"), params["speed"], 3)
     now = str(int(time.time() * 1000))
-    _set(root, ns, "createTime", now)
-    _set(root, ns, "updateTime", now)
+    text = _replace_value(text, prefix, "createTime", now)
+    text = _replace_value(text, prefix, "updateTime", now)
 
-    ET.register_namespace("", KML_NS)
-    ET.register_namespace("wpml", ns)
-    xml = ET.tostring(root, encoding="UTF-8", xml_declaration=True)
+    # sanity check: the edited template parses and carries exactly the requested polygon
+    check = parse_template(text.encode("utf-8"))
+    if check is None or len(check) != len(polygon) or any(
+            abs(a[0] - b[0]) > 1e-9 or abs(a[1] - b[1]) > 1e-9 for a, b in zip(check, polygon)):
+        raise WpmlError("internal error: edited polygon does not round-trip")
+
     out = io.BytesIO()
     with zipfile.ZipFile(out, "w", zipfile.ZIP_DEFLATED) as zf:
-        zf.writestr(TEMPLATE, xml)
-        # keep resources (e.g. wpmz/res/...) but never the old executable route
+        zf.writestr(TEMPLATE, text.encode("utf-8"))
         for name, data in files.items():
-            if name not in (TEMPLATE, WAYLINES) and not name.endswith("/"):
+            if name != TEMPLATE and not name.endswith("/"):
                 zf.writestr(name, data)
     return out.getvalue()
+
+
+def parse_template(raw: bytes) -> list[list[float]] | None:
+    _, polygon = _polygon(safe_fromstring(raw))
+    return polygon
