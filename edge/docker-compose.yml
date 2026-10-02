@@ -72,6 +72,8 @@ services:
     environment:
       MINIO_ROOT_USER: ${MINIO_ROOT_USER}
       MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD}
+      # browser access (COG/PMTiles range requests, mapping layers) only from the web UI origin
+      MINIO_API_CORS_ALLOW_ORIGIN: http://${SERVER_HOST}:8085
     volumes:
       - ./data/minio:/data
     ports:
@@ -89,6 +91,10 @@ services:
       MINIO_STS_USER: ${MINIO_STS_USER}
       MINIO_STS_PASSWORD: ${MINIO_STS_PASSWORD}
       MINIO_BUCKET: ${MINIO_BUCKET}
+      MAPPING_MINIO_USER: ${MAPPING_MINIO_USER}
+      MAPPING_MINIO_PASSWORD: ${MAPPING_MINIO_PASSWORD}
+      MAPPING_RESULTS_BUCKET: mapping-results
+      MAPPING_BASEMAPS_BUCKET: basemaps
     volumes:
       - ../evidence/scripts/minio-init.sh:/init/minio-init.sh:ro
     depends_on:
