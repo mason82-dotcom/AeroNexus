@@ -1,0 +1,684 @@
+From 1a7c3f1796bb7a6a01003f563924421d98a702fb Mon Sep 17 00:00:00 2001
+From: RomaN <mason82.rm@googlemail.com>
+Date: Fri, 2 Oct 2026 22:57:53 +0200
+Subject: [PATCH] onprem: Photovoltaik page (thermal inspections, hot spots on
+ the map, crops, status, exports)
+
+---
+ src/api/http/config.ts                       |   2 +
+ src/api/pv.ts                                | 104 ++++++
+ src/components/common/sidebar.vue            |   1 +
+ src/hooks/use-pv-overlay.ts                  |  44 +++
+ src/locales/de.ts                            |  64 ++++
+ src/pages/page-web/projects/photovoltaik.vue | 369 +++++++++++++++++++
+ src/router/index.ts                          |   5 +
+ src/types/enums.ts                           |   1 +
+ 8 files changed, 590 insertions(+)
+ create mode 100644 src/api/pv.ts
+ create mode 100644 src/hooks/use-pv-overlay.ts
+ create mode 100644 src/pages/page-web/projects/photovoltaik.vue
+
+diff --git a/src/api/http/config.ts b/src/api/http/config.ts
+index a926ff7..f6a11a6 100644
+--- a/src/api/http/config.ts
++++ b/src/api/http/config.ts
+@@ -15,6 +15,8 @@ export const CURRENT_CONFIG = {
+   mappingURL: env.VITE_MAPPING_URL || '',
+   // AeroNexus Farming Guide service (farming-guide/service), e.g. http://192.168.1.10:6791/
+   farmingURL: env.VITE_FARMING_URL || '',
++  // AeroNexus Photovoltaik service (photovoltaik-tool/service), e.g. http://192.168.1.10:6792/
++  pvURL: env.VITE_PV_URL || '',
+ 
+   // livestreaming (RTMP ingest on MediaMTX)
+   rtmpURL: env.VITE_RTMP_URL || '',
+diff --git a/src/api/pv.ts b/src/api/pv.ts
+new file mode 100644
+index 0000000..ee590cd
+--- /dev/null
++++ b/src/api/pv.ts
+@@ -0,0 +1,104 @@
++// AeroNexus Photovoltaik service (thermal inspections of PV plants). Same login token as the DJI backend.
++import axios from 'axios'
++import { CURRENT_CONFIG } from '/@/api/http/config'
++import { authToken } from '/@/api/mapping'
++import { ELocalStorageKey } from '/@/types/enums'
++
++export type AnomalyStatus = 'open' | 'confirmed' | 'dismissed'
++export type PvExport = 'report' | 'csv' | 'geojson'
++
++export interface Anomaly {
++  id: string
++  number: number
++  klass: 1 | 2 | 3
++  delta: number
++  t_max: number
++  t_background: number
++  type: string
++  area_m2: number | null
++  lat: number | null
++  lon: number | null
++  height_source: string | null
++  file_name: string
++  seen_in: string[]
++  status: AnomalyStatus
++  note: string
++  has_crop: boolean
++}
++
++export interface InspectionImage {
++  file_id: string
++  file_name: string
++  anomalies: number
++  skipped?: string
++  model?: string
++  gps?: boolean
++  height_m?: number
++  height_source?: string
++  t_min?: number
++  t_max?: number
++}
++
++export interface ThermalParams { emissivity: number, reflected_temp: number, humidity: number }
++export interface DetectParams { min_delta: number, class1: number, class2: number, class3: number }
++
++export interface Inspection {
++  id: string
++  name: string
++  created_at: string
++  created_by: string
++  status: 'queued' | 'running' | 'done' | 'failed'
++  progress: number
++  error?: string | null
++  image_count: number
++  params: { thermal: ThermalParams, detect: DetectParams, merge_m: number }
++  summary?: { images: number, analysed: number, anomalies: number, by_class: Record<string, number>, without_position: number }
++  images?: InspectionImage[]
++  anomalies?: Anomaly[]
++}
++
++export function pvBase (): string {
++  return CURRENT_CONFIG.pvURL.replace(/\/+$/, '')
++}
++
++const http = axios.create({ timeout: 60000 })
++http.interceptors.request.use(config => {
++  config.baseURL = pvBase()
++  config.headers[ELocalStorageKey.Token] = authToken()
++  return config
++})
++
++export async function pvStatus (): Promise<{ tsdk: boolean, queue: number }> {
++  return (await http.get('/api/pv/status')).data
++}
++
++export async function listInspections (): Promise<Inspection[]> {
++  return (await http.get('/api/pv/inspections')).data
++}
++
++export async function getInspection (id: string): Promise<Inspection> {
++  return (await http.get(`/api/pv/inspections/${id}`)).data
++}
++
++export async function createInspection (body: {
++  name: string, file_ids: string[], thermal: Partial<ThermalParams>, detect: Partial<DetectParams>, merge_m: number
++}): Promise<Inspection> {
++  return (await http.post('/api/pv/inspections', body)).data
++}
++
++export async function updateAnomaly (id: string, aid: string, body: { status?: AnomalyStatus, note?: string }): Promise<Anomaly> {
++  return (await http.put(`/api/pv/inspections/${id}/anomalies/${aid}`, body)).data
++}
++
++export async function deleteInspection (id: string): Promise<void> {
++  await http.delete(`/api/pv/inspections/${id}`)
++}
++
++// <img>/<a href> cannot send headers: login token as query parameter (never logged by the service)
++export function cropUrl (id: string, aid: string): string {
++  return `${pvBase()}/api/pv/inspections/${id}/crops/${aid}.png?token=${encodeURIComponent(authToken())}`
++}
++
++export function exportUrl (id: string, fmt: PvExport): string {
++  return `${pvBase()}/api/pv/inspections/${id}/export/${fmt}?token=${encodeURIComponent(authToken())}`
++}
+diff --git a/src/components/common/sidebar.vue b/src/components/common/sidebar.vue
+index a8130d6..2afba97 100644
+--- a/src/components/common/sidebar.vue
++++ b/src/components/common/sidebar.vue
+@@ -62,6 +62,7 @@ export default defineComponent({
+       { key: 5, label: t('Task Plan Library'), path: '/' + ERouterName.TASK, icon: 'CalendarOutlined' },
+       { key: 6, label: t('Flight Area'), path: '/' + ERouterName.FLIGHT_AREA, icon: 'GroupOutlined' },
+       { key: 7, label: t('Mapping'), path: '/' + ERouterName.MAPPING, icon: 'GlobalOutlined' },
++      { key: 8, label: t('Photovoltaics'), path: '/' + ERouterName.PHOTOVOLTAIK, icon: 'ThunderboltOutlined' },
+     ]
+ 
+     function selectedRoute (item: IOptions) {
+diff --git a/src/hooks/use-pv-overlay.ts b/src/hooks/use-pv-overlay.ts
+new file mode 100644
+index 0000000..21d4dfb
+--- /dev/null
++++ b/src/hooks/use-pv-overlay.ts
+@@ -0,0 +1,44 @@
++// Anomalies of one PV inspection as circle markers on the shared Leaflet map (colour = class).
++import L from 'leaflet'
++import { getRoot } from '/@/root'
++import { Anomaly } from '/@/api/pv'
++
++export const CLASS_COLORS: Record<number, string> = { 1: '#fadb14', 2: '#fa8c16', 3: '#f5222d' }
++let overlay: L.FeatureGroup | null = null
++const markers: Record<string, L.CircleMarker> = {}
++
++function map (): L.Map | undefined {
++  return getRoot()?.$map?.leaflet
++}
++
++export function showAnomalies (items: Anomaly[], onClick: (a: Anomaly) => void, fit = true) {
++  clearAnomalies()
++  const m = map()
++  if (!m) return
++  overlay = L.featureGroup().addTo(m)
++  items.filter(a => a.lat !== null && a.lon !== null).forEach(a => {
++    const dismissed = a.status === 'dismissed'
++    const mk = L.circleMarker([a.lat as number, a.lon as number], {
++      radius: 7 + a.klass, color: dismissed ? '#888' : '#000', weight: 1,
++      fillColor: dismissed ? '#bbb' : CLASS_COLORS[a.klass], fillOpacity: dismissed ? 0.4 : 0.9,
++    }).bindTooltip(`#${a.number}: ${a.delta.toFixed(1)} K`)
++    mk.on('click', () => onClick(a))
++    mk.addTo(overlay as L.FeatureGroup)
++    markers[a.id] = mk
++  })
++  if (fit && overlay.getLayers().length) m.fitBounds(overlay.getBounds(), { padding: [40, 40], maxZoom: 20 })
++}
++
++export function focusAnomaly (a: Anomaly) {
++  const m = map()
++  const mk = markers[a.id]
++  if (!m || !mk) return
++  m.setView(mk.getLatLng(), Math.max(m.getZoom(), 19))
++  mk.openTooltip()
++}
++
++export function clearAnomalies () {
++  overlay?.remove()
++  overlay = null
++  Object.keys(markers).forEach(k => delete markers[k])
++}
+diff --git a/src/locales/de.ts b/src/locales/de.ts
+index d706031..0ef7e7c 100644
+--- a/src/locales/de.ts
++++ b/src/locales/de.ts
+@@ -530,4 +530,68 @@ export default {
+   "Error message: {0} {1}": "Fehlermeldung: {0} {1}",
+   "({0}) Upgrade failed": "({0}) Update fehlgeschlagen",
+   "Loading...": "Wird geladen …",
++  "Anomaly #{0}": "Anomalie Nr. {0}",
++  "Class": "Klasse",
++  "Class 1": "Klasse 1",
++  "Class 2": "Klasse 2",
++  "Class 3": "Klasse 3",
++  "Class 1 / 2 / 3 from (K)": "Klasse 1 / 2 / 3 ab (K)",
++  "Clear sky: low (e.g. -20); cloudy: near air temperature": "Klarer Himmel: niedrig (z. B. -20); bewölkt: etwa Lufttemperatur",
++  "DJI Thermal SDK not installed": "DJI Thermal SDK nicht installiert",
++  "Delete this inspection with all results?": "Inspektion mit allen Ergebnissen löschen?",
++  "Deleting failed: ": "Löschen fehlgeschlagen: ",
++  "Delta-T (K)": "ΔT (K)",
++  "Dismissed anomalies are not exported. Type and area are estimates from the image geometry.": "Verworfene Anomalien werden nicht exportiert. Art und Fläche sind Schätzungen aus der Bildgeometrie.",
++  "Emissivity": "Emissionsgrad",
++  "Glass of PV modules: 0.85 to 0.90": "Glas von PV-Modulen: 0,85 bis 0,90",
++  "Humidity (%)": "Luftfeuchte (%)",
++  "Image": "Bild",
++  "Images": "Bilder",
++  "Inspection \"{0}\" deleted": "Inspektion \"{0}\" gelöscht",
++  "Inspection queued": "Inspektion eingereiht",
++  "Inspections": "Inspektionen",
++  "Meaningful results need irradiance above 600 W/m2, clear sky and modules under load.": "Aussagekräftig nur bei Einstrahlung über 600 W/m², klarem Himmel und Anlage unter Last.",
++  "Measurement and detection parameters": "Mess- und Erkennungsparameter",
++  "Merge radius (m)": "Zusammenfassen im Umkreis (m)",
++  "Min. Delta-T (K)": "Min. ΔT (K)",
++  "New inspection": "Neue Inspektion",
++  "No inspections yet. Fly the plant with the thermal camera (R-JPEG), let Pilot 2 upload the photos and select them here.": "Noch keine Inspektionen. Anlage mit der Wärmebildkamera (R-JPEG) befliegen, Fotos von Pilot 2 hochladen lassen und hier auswählen.",
++  "No.": "Nr.",
++  "Note": "Notiz",
++  "Note saved": "Notiz gespeichert",
++  "Note, e.g. module number, cause": "Notiz, z. B. Modulnummer, Ursache",
++  "Photovoltaics": "Photovoltaik",
++  "Photovoltaics service not reachable: ": "Photovoltaik-Dienst nicht erreichbar: ",
++  "Position": "Position",
++  "Reflected temperature (deg C)": "Reflektierte Temperatur (°C)",
++  "Report (print to PDF)": "Bericht (als PDF drucken)",
++  "Result": "Ergebnis",
++  "Save note": "Notiz speichern",
++  "Show dismissed": "Verworfene zeigen",
++  "Start": "Starten",
++  "Starting the inspection failed: ": "Start der Inspektion fehlgeschlagen: ",
++  "T max (deg C)": "T max (°C)",
++  "Table and images": "Tabelle und Bilder",
++  "Temperatures need the DJI Thermal SDK on the server: photovoltaik-tool/tools/install-tsdk.sh": "Für Temperaturen wird das DJI Thermal SDK auf dem Server benötigt: photovoltaik-tool/tools/install-tsdk.sh",
++  "The same fault in overlapping images is reported once": "Derselbe Fehler in überlappenden Bildern wird einmal gemeldet",
++  "Thermal images ({0} selected of {1})": "Wärmebilder ({0} von {1} ausgewählt)",
++  "Type (estimate)": "Art (Schätzung)",
++  "confirmed": "bestätigt",
++  "dismissed": "verworfen",
++  "done": "fertig",
++  "failed": "fehlgeschlagen",
++  "open": "offen",
++  "queued": "wartet",
++  "running": "läuft",
++  "observe": "beobachten",
++  "plan maintenance": "Wartung planen",
++  "urgent": "dringend",
++  "e.g. PV roof barn 2026-10-02": "z. B. PV-Dach Scheune 2026-10-02",
++  "height from laser rangefinder": "Höhe per Laser-Entfernungsmesser",
++  "height from take-off point": "Höhe ab Startpunkt",
++  "no GPS": "kein GPS",
++  "surroundings": "Umgebung",
++  "{0} anomalies": "{0} Anomalien",
++  "{0} anomalies without position (no GPS)": "{0} Anomalien ohne Position (kein GPS)",
++  "{0} of {1} images analysed": "{0} von {1} Bildern ausgewertet",
+ } as Record<string, string>
+diff --git a/src/pages/page-web/projects/photovoltaik.vue b/src/pages/page-web/projects/photovoltaik.vue
+new file mode 100644
+index 0000000..651c9b3
+--- /dev/null
++++ b/src/pages/page-web/projects/photovoltaik.vue
+@@ -0,0 +1,369 @@
++<template>
++  <div class="pv-wrapper height-100">
++    <Title :title="$t('Photovoltaics')" />
++    <div class="pv-content uranus-scrollbar">
++      <a-alert v-if="tsdk === false" type="warning" show-icon class="alert"
++               :message="$t('DJI Thermal SDK not installed')"
++               :description="$t('Temperatures need the DJI Thermal SDK on the server: photovoltaik-tool/tools/install-tsdk.sh')" />
++
++      <div class="section">
++        <div class="section-head">
++          <span>{{ $t('Inspections') }}</span>
++          <span>
++            <a class="reload" @click="refresh"><ReloadOutlined /></a>
++            <a-button size="small" type="primary" @click="openCreate">{{ $t('New inspection') }}</a-button>
++          </span>
++        </div>
++        <div v-if="!inspections.length" class="hint">{{ $t('No inspections yet. Fly the plant with the thermal camera (R-JPEG), let Pilot 2 upload the photos and select them here.') }}</div>
++        <div v-for="ins in inspections" :key="ins.id" class="item" :class="{ active: current && current.id === ins.id }">
++          <div class="row">
++            <a class="name" :title="ins.name" @click="open(ins)">{{ ins.name }}</a>
++            <a-tag :color="statusColor[ins.status]">{{ $t(statusText[ins.status]) }}</a-tag>
++            <a-popconfirm :title="$t('Delete this inspection with all results?')" :ok-text="$t('Delete')"
++                          :cancel-text="$t('Cancel')" @confirm="remove(ins)">
++              <a class="danger" :title="$t('Delete')"><DeleteOutlined /></a>
++            </a-popconfirm>
++          </div>
++          <a-progress v-if="ins.status === 'running' || ins.status === 'queued'" :percent="ins.progress" size="small" />
++          <div class="meta">
++            {{ $t('{0} images', ins.image_count) }} &#183; {{ ins.created_at.replace('T', ' ').replace('Z', '') }} UTC
++          </div>
++          <div v-if="ins.summary" class="meta">
++            <span v-for="k in [3, 2, 1]" :key="k" class="cls">
++              <span class="dot" :style="{ background: CLASS_COLORS[k] }"></span>{{ ins.summary.by_class[String(k)] || 0 }}
++            </span>
++            &#183; {{ $t('{0} anomalies', ins.summary.anomalies) }}
++          </div>
++          <div v-if="ins.error" class="error">{{ ins.error }}</div>
++        </div>
++      </div>
++
++      <!-- current inspection -->
++      <div v-if="current && current.status === 'done'" class="section">
++        <div class="section-head">
++          <span :title="current.name">{{ $t('Result') }}</span>
++          <a-button size="small" @click="tableVisible = true">{{ $t('Table and images') }}</a-button>
++        </div>
++        <div class="meta">
++          {{ $t('{0} of {1} images analysed', current.summary.analysed, current.summary.images) }}<span
++            v-if="current.summary.without_position">, {{ $t('{0} anomalies without position (no GPS)', current.summary.without_position) }}</span>
++        </div>
++        <div class="filters">
++          <a-checkbox-group v-model:value="classFilter" :options="classOptions" />
++          <a-checkbox v-model:checked="showDismissed">{{ $t('Show dismissed') }}</a-checkbox>
++        </div>
++        <div v-for="a in visibleAnomalies" :key="a.id" class="anomaly" :class="{ selected: selected && selected.id === a.id, dismissed: a.status === 'dismissed' }"
++             @click="select(a)">
++          <span class="dot" :style="{ background: CLASS_COLORS[a.klass] }"></span>
++          <b>#{{ a.number }}</b> &#916;T {{ a.delta.toFixed(1) }} K
++          <span class="type">{{ a.type }}</span>
++          <a-tag v-if="a.status !== 'open'" :color="a.status === 'confirmed' ? 'red' : 'default'" class="st">{{ $t(statusText[a.status]) }}</a-tag>
++        </div>
++        <div class="exports">
++          <span class="label">{{ $t('Export:') }}</span>
++          <a :href="exportUrl(current.id, 'report')" target="_blank">{{ $t('Report (print to PDF)') }}</a>
++          <a :href="exportUrl(current.id, 'csv')">CSV</a>
++          <a :href="exportUrl(current.id, 'geojson')">GeoJSON</a>
++        </div>
++        <div class="hint">{{ $t('Dismissed anomalies are not exported. Type and area are estimates from the image geometry.') }}</div>
++      </div>
++    </div>
++
++    <!-- anomaly detail -->
++    <a-drawer :visible="!!selected" :title="selected ? $t('Anomaly #{0}', selected.number) : ''" placement="right"
++              width="380" :mask="false" @close="selected = null">
++      <template v-if="selected && current">
++        <img v-if="selected.has_crop" :src="cropUrl(current.id, selected.id)" class="crop" />
++        <table class="facts">
++          <tr><td>{{ $t('Class') }}</td><td><span class="dot" :style="{ background: CLASS_COLORS[selected.klass] }"></span>
++            {{ selected.klass }} - {{ $t(classText[selected.klass]) }}</td></tr>
++          <tr><td>&#916;T</td><td>{{ selected.delta.toFixed(1) }} K</td></tr>
++          <tr><td>T max</td><td>{{ selected.t_max.toFixed(1) }} &#176;C ({{ $t('surroundings') }} {{ selected.t_background.toFixed(1) }} &#176;C)</td></tr>
++          <tr><td>{{ $t('Type (estimate)') }}</td><td>{{ selected.type }}<span v-if="selected.area_m2 !== null">, {{ selected.area_m2.toFixed(2) }} m&#178;</span></td></tr>
++          <tr><td>{{ $t('Position') }}</td><td><span v-if="selected.lat !== null">{{ selected.lat.toFixed(7) }}, {{ selected.lon.toFixed(7) }}
++            <small>({{ selected.height_source === 'lrf' ? $t('height from laser rangefinder') : $t('height from take-off point') }})</small></span>
++            <span v-else>{{ $t('no GPS') }}</span></td></tr>
++          <tr><td>{{ $t('Images') }}</td><td>{{ selected.seen_in.join(', ') }}</td></tr>
++        </table>
++        <a-radio-group :value="selected.status" button-style="solid" size="small" class="status" @change="(e) => setStatus(selected, e.target.value)">
++          <a-radio-button value="open">{{ $t('open') }}</a-radio-button>
++          <a-radio-button value="confirmed">{{ $t('confirmed') }}</a-radio-button>
++          <a-radio-button value="dismissed">{{ $t('dismissed') }}</a-radio-button>
++        </a-radio-group>
++        <a-textarea v-model:value="noteDraft" :rows="3" :maxlength="500" :placeholder="$t('Note, e.g. module number, cause')" />
++        <a-button size="small" class="save" :disabled="noteDraft === selected.note" @click="saveNote">{{ $t('Save note') }}</a-button>
++      </template>
++    </a-drawer>
++
++    <!-- table -->
++    <a-modal v-model:visible="tableVisible" :title="current ? current.name : ''" width="1100px" :footer="null">
++      <a-table v-if="current" size="small" :data-source="visibleAnomalies" :columns="tableColumns" row-key="id"
++               :pagination="{ pageSize: 20 }" :scroll="{ y: 560 }"
++               :custom-row="(r) => ({ onClick: () => { tableVisible = false; select(r) } })">
++        <template #crop="{ record }">
++          <img v-if="record.has_crop" :src="cropUrl(current.id, record.id)" class="thumb" />
++        </template>
++        <template #klass="{ record }">
++          <span class="dot" :style="{ background: CLASS_COLORS[record.klass] }"></span>{{ record.klass }}
++        </template>
++        <template #type="{ record }">{{ record.type }}</template>
++        <template #status="{ record }">{{ $t(statusText[record.status]) }}</template>
++      </a-table>
++    </a-modal>
++
++    <!-- create -->
++    <a-modal v-model:visible="createVisible" :title="$t('New inspection')" :confirm-loading="creating"
++             :ok-text="$t('Start')" :ok-button-props="{ disabled: !canCreate }" width="720px" @ok="submit">
++      <a-form layout="vertical">
++        <a-form-item :label="$t('Name')">
++          <a-input v-model:value="form.name" :maxlength="80" :placeholder="$t('e.g. PV roof barn 2026-10-02')" />
++        </a-form-item>
++        <a-form-item :label="$t('Thermal images ({0} selected of {1})', form.ids.length, thermalMedia.length)">
++          <div class="media-tools">
++            <a @click="form.ids = thermalMedia.map(m => m.file_id)">{{ $t('All') }}</a>
++            <a v-for="d in days" :key="d" @click="form.ids = thermalMedia.filter(m => m.create_time.startsWith(d)).map(m => m.file_id)">{{ d }}</a>
++            <a @click="form.ids = []">{{ $t('None') }}</a>
++          </div>
++          <a-table size="small" :pagination="false" :scroll="{ y: 260 }" row-key="file_id" :loading="mediaLoading"
++                   :columns="mediaColumns" :data-source="thermalMedia"
++                   :row-selection="{ selectedRowKeys: form.ids, onChange: (keys) => form.ids = keys }" />
++        </a-form-item>
++        <a-collapse ghost>
++          <a-collapse-panel key="p" :header="$t('Measurement and detection parameters')">
++            <div class="params">
++              <a-form-item :label="$t('Emissivity')" :title="$t('Glass of PV modules: 0.85 to 0.90')">
++                <a-input-number v-model:value="form.thermal.emissivity" :min="0.1" :max="1" :step="0.01" />
++              </a-form-item>
++              <a-form-item :label="$t('Reflected temperature (deg C)')" :title="$t('Clear sky: low (e.g. -20); cloudy: near air temperature')">
++                <a-input-number v-model:value="form.thermal.reflected_temp" :min="-40" :max="100" />
++              </a-form-item>
++              <a-form-item :label="$t('Humidity (%)')">
++                <a-input-number v-model:value="form.thermal.humidity" :min="0" :max="100" />
++              </a-form-item>
++              <a-form-item :label="$t('Min. Delta-T (K)')">
++                <a-input-number v-model:value="form.detect.min_delta" :min="1" :max="50" :step="0.5" />
++              </a-form-item>
++              <a-form-item :label="$t('Class 1 / 2 / 3 from (K)')">
++                <a-input-number v-model:value="form.detect.class1" :min="1" :max="100" class="small" />
++                <a-input-number v-model:value="form.detect.class2" :min="1" :max="100" class="small" />
++                <a-input-number v-model:value="form.detect.class3" :min="1" :max="100" class="small" />
++              </a-form-item>
++              <a-form-item :label="$t('Merge radius (m)')" :title="$t('The same fault in overlapping images is reported once')">
++                <a-input-number v-model:value="form.merge_m" :min="0" :max="20" :step="0.5" />
++              </a-form-item>
++            </div>
++          </a-collapse-panel>
++        </a-collapse>
++        <div class="hint">{{ $t('Meaningful results need irradiance above 600 W/m2, clear sky and modules under load.') }}</div>
++      </a-form>
++    </a-modal>
++  </div>
++</template>
++
++<script lang="ts" setup>
++import { t } from '/@/locales'
++import { computed, onMounted, onUnmounted, reactive, ref, watch } from 'vue'
++import { message } from 'ant-design-vue'
++import { DeleteOutlined, ReloadOutlined } from '@ant-design/icons-vue'
++import Title from '/@/components/workspace/Title.vue'
++import { MappingMedia, getMappingMedia } from '/@/api/mapping'
++import {
++  Anomaly, AnomalyStatus, Inspection, createInspection, cropUrl, deleteInspection, exportUrl, getInspection,
++  listInspections, pvStatus, updateAnomaly,
++} from '/@/api/pv'
++import { CLASS_COLORS, clearAnomalies, focusAnomaly, showAnomalies } from '/@/hooks/use-pv-overlay'
++
++const inspections = ref<Inspection[]>([])
++const current = ref<Inspection | null>(null)
++const selected = ref<Anomaly | null>(null)
++const noteDraft = ref('')
++const tsdk = ref<boolean | null>(null)
++const tableVisible = ref(false)
++const createVisible = ref(false)
++const creating = ref(false)
++const media = ref<MappingMedia[]>([])
++const mediaLoading = ref(false)
++const classFilter = ref<number[]>([1, 2, 3])
++const showDismissed = ref(false)
++const form = reactive({
++  name: '', ids: [] as string[], merge_m: 1.0,
++  thermal: { emissivity: 0.85, reflected_temp: 23, humidity: 70 },
++  detect: { min_delta: 3, class1: 3, class2: 10, class3: 20 },
++})
++
++const statusColor: Record<string, string> = { queued: 'default', running: 'processing', done: 'success', failed: 'error' }
++const statusText: Record<string, string> = {
++  queued: 'queued', running: 'running', done: 'done', failed: 'failed', open: 'open', confirmed: 'confirmed', dismissed: 'dismissed',
++}
++const classText: Record<number, string> = { 1: 'observe', 2: 'plan maintenance', 3: 'urgent' }
++const classOptions = [
++  { label: t('Class 3'), value: 3 }, { label: t('Class 2'), value: 2 }, { label: t('Class 1'), value: 1 },
++]
++const mediaColumns = [
++  { title: t('File'), dataIndex: 'file_name', ellipsis: true },
++  { title: t('Camera'), dataIndex: 'payload', width: 150, ellipsis: true },
++  { title: t('Time (UTC)'), dataIndex: 'create_time', width: 170, customRender: ({ text }: { text: string }) => text.replace('T', ' ').replace('Z', '') },
++]
++const tableColumns = [
++  { title: t('No.'), dataIndex: 'number', width: 60, sorter: (a: Anomaly, b: Anomaly) => a.number - b.number },
++  { title: t('Image'), width: 130, slots: { customRender: 'crop' } },
++  { title: t('Class'), width: 70, slots: { customRender: 'klass' }, sorter: (a: Anomaly, b: Anomaly) => a.klass - b.klass },
++  { title: t('Delta-T (K)'), dataIndex: 'delta', width: 80, sorter: (a: Anomaly, b: Anomaly) => a.delta - b.delta },
++  { title: t('T max (deg C)'), dataIndex: 't_max', width: 90 },
++  { title: t('Type (estimate)'), width: 210, slots: { customRender: 'type' } },
++  { title: t('Status'), width: 100, slots: { customRender: 'status' } },
++  { title: t('Note'), dataIndex: 'note', ellipsis: true },
++]
++
++// DJI thermal photos end with _T (M3T/M4T R-JPEG)
++const thermalMedia = computed(() => media.value.filter(m => /_T\.jpe?g$/i.test(m.file_name)))
++const days = computed(() => [...new Set(thermalMedia.value.map(m => m.create_time.slice(0, 10)))].slice(0, 6))
++const canCreate = computed(() => form.ids.length > 0)
++const visibleAnomalies = computed(() => (current.value?.anomalies || [])
++  .filter(a => classFilter.value.includes(a.klass) && (showDismissed.value || a.status !== 'dismissed')))
++
++function errorText (e: any): string {
++  const detail = e?.response?.data?.detail
++  return typeof detail === 'string' ? detail : (detail ? JSON.stringify(detail) : String(e))
++}
++
++async function refresh () {
++  try {
++    inspections.value = await listInspections()
++    tsdk.value = (await pvStatus()).tsdk
++    if (current.value) {
++      const fresh = inspections.value.find(i => i.id === current.value?.id)
++      if (!fresh) close()
++      else if (fresh.status !== current.value.status) await open(fresh)
++    }
++  } catch (e) {
++    message.error(t('Photovoltaics service not reachable: ') + errorText(e))
++  }
++}
++
++async function open (ins: Inspection) {
++  current.value = await getInspection(ins.id)
++  selected.value = null
++  redraw(true)
++}
++
++function redraw (fit = false) {
++  if (current.value?.status === 'done') showAnomalies(visibleAnomalies.value, select, fit)
++  else clearAnomalies()
++}
++
++function close () {
++  current.value = null
++  selected.value = null
++  clearAnomalies()
++}
++
++function select (a: Anomaly) {
++  selected.value = a
++  noteDraft.value = a.note
++  focusAnomaly(a)
++}
++
++async function setStatus (a: Anomaly, status: AnomalyStatus) {
++  try {
++    Object.assign(a, await updateAnomaly(current.value!.id, a.id, { status }))
++    redraw()
++  } catch (e) {
++    message.error(t('Saving failed: ') + errorText(e))
++  }
++}
++
++async function saveNote () {
++  const a = selected.value!
++  try {
++    Object.assign(a, await updateAnomaly(current.value!.id, a.id, { note: noteDraft.value }))
++    message.success(t('Note saved'))
++  } catch (e) {
++    message.error(t('Saving failed: ') + errorText(e))
++  }
++}
++
++async function remove (ins: Inspection) {
++  try {
++    await deleteInspection(ins.id)
++    if (current.value?.id === ins.id) close()
++    message.success(t('Inspection "{0}" deleted', ins.name))
++  } catch (e) {
++    message.error(t('Deleting failed: ') + errorText(e))
++  }
++  await refresh()
++}
++
++async function openCreate () {
++  createVisible.value = true
++  mediaLoading.value = true
++  try {
++    media.value = (await getMappingMedia(1, 500)).list
++  } catch (e) {
++    message.error(t('Mapping service not reachable'))
++  } finally {
++    mediaLoading.value = false
++  }
++}
++
++async function submit () {
++  creating.value = true
++  try {
++    const ins = await createInspection({ name: form.name, file_ids: form.ids, thermal: form.thermal, detect: form.detect, merge_m: form.merge_m })
++    createVisible.value = false
++    form.ids = []
++    form.name = ''
++    message.success(t('Inspection queued'))
++    await refresh()
++    await open(ins)
++  } catch (e) {
++    message.error(t('Starting the inspection failed: ') + errorText(e))
++  } finally {
++    creating.value = false
++  }
++}
++
++watch([classFilter, showDismissed], () => redraw())
++
++let timer: number | undefined
++onMounted(() => {
++  refresh()
++  // progress of running inspections
++  timer = window.setInterval(() => {
++    if (inspections.value.some(i => i.status === 'queued' || i.status === 'running')) refresh()
++  }, 3000)
++})
++onUnmounted(() => {
++  window.clearInterval(timer)
++  clearAnomalies()
++})
++</script>
++
++<style lang="scss" scoped>
++.pv-wrapper { display: flex; flex-direction: column; }
++.pv-content { flex: 1; overflow-y: auto; padding: 0 12px 12px; color: #fff; }
++.alert { margin: 8px 0; }
++.section { margin-top: 12px; }
++.section-head { display: flex; justify-content: space-between; align-items: center; font-weight: 600; margin-bottom: 6px; }
++.reload { margin-right: 10px; }
++.item { padding: 6px; border-bottom: 1px solid #3c3c3c; &.active { background: #2d3442; } }
++.row { display: flex; align-items: center; gap: 8px; .name { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: #fff; } }
++.meta { color: #aaa; font-size: 12px; margin-top: 2px; }
++.cls { margin-right: 8px; }
++.dot { display: inline-block; width: 10px; height: 10px; border-radius: 50%; margin-right: 4px; vertical-align: middle; border: 1px solid #000; }
++.error { color: #ff7875; font-size: 12px; }
++.hint { color: #888; font-size: 12px; margin-top: 6px; }
++.filters { margin: 6px 0; :deep(.ant-checkbox-wrapper) { color: #ddd; font-size: 12px; } }
++.anomaly { padding: 4px 6px; cursor: pointer; font-size: 13px; border-radius: 3px;
++  &:hover, &.selected { background: #2d3442; } &.dismissed { opacity: 0.5; }
++  .type { color: #aaa; font-size: 12px; margin-left: 6px; } .st { margin-left: 6px; } }
++.exports { display: flex; gap: 10px; margin-top: 10px; flex-wrap: wrap; .label { color: #888; font-size: 12px; } }
++.crop { width: 100%; margin-bottom: 10px; image-rendering: pixelated; }
++.thumb { width: 110px; image-rendering: pixelated; }
++.facts { width: 100%; font-size: 13px; td { padding: 3px 4px; vertical-align: top; } td:first-child { color: #888; width: 110px; } }
++.status { margin: 10px 0; }
++.save { margin-top: 6px; }
++.media-tools { display: flex; gap: 10px; flex-wrap: wrap; margin-bottom: 6px; }
++.params { display: grid; grid-template-columns: 1fr 1fr; column-gap: 16px; .small { width: 70px; margin-right: 6px; } }
++.danger { color: #ff4d4f; }
++</style>
+diff --git a/src/router/index.ts b/src/router/index.ts
+index ab40c50..798284b 100644
+--- a/src/router/index.ts
++++ b/src/router/index.ts
+@@ -114,6 +114,11 @@ const routes: Array<RouteRecordRaw> = [
+         name: ERouterName.MAPPING,
+         component: () => import('/@/pages/page-web/projects/mapping.vue')
+       },
++      {
++        path: '/' + ERouterName.PHOTOVOLTAIK,
++        name: ERouterName.PHOTOVOLTAIK,
++        component: () => import('/@/pages/page-web/projects/photovoltaik.vue')
++      },
+     ]
+   },
+   // pilot
+diff --git a/src/types/enums.ts b/src/types/enums.ts
+index 3f4fb9c..c1d7b3a 100644
+--- a/src/types/enums.ts
++++ b/src/types/enums.ts
+@@ -17,6 +17,7 @@ export enum ERouterName {
+     FIRMWARES = 'firmwares',
+     FLIGHT_AREA = 'flight-area',
+     MAPPING = 'mapping',
++    PHOTOVOLTAIK = 'photovoltaik',
+ 
+     PILOT = 'pilot-login',
+     PILOT_HOME = 'pilot-home',
+-- 
+2.47.3
+

@@ -75,6 +75,8 @@ Editing routes (mapping-tool/service/app/wpml.py, verified with Pilot 2 on RC Pr
   route from template.kml, so the original waylines.wpml is kept as placeholder.
 - Never re-serialize template.kml (ElementTree): Pilot 2 then read the polygon lat/lon swapped (route
   in Somalia). Edit values as text only, keep declaration, indentation and number style.
+- Height change of a web-edited copy (globalShootHeight/height/surfaceRelativeHeight, ellipsoidHeight shifted)
+  accepted by Pilot 2 on RC Pro (verified 2026-10-03).
 
 ## Build notes
 - MySQL 8.4 LTS (upgraded in place from 8.0.39 on 2026-10-02, 8.0 is EOL). All users use caching_sha2_password;
@@ -121,3 +123,14 @@ Editing routes (mapping-tool/service/app/wpml.py, verified with Pilot 2 on RC Pr
   GDAL COG/gdal2tiles write temp files into cwd: run them inside the job dir. Full test on the Pi with
   `compute-agent/tools/fake_nodeodm.py` (takes the OLDEST queued job, park real jobs first).
 - Host ports on the dev Pi: MQTT 1884, MQTT-WS 8084, web 8085 (1883/8083/8080 taken by other services).
+
+## Photovoltaik tool
+- Own stdlib service `photovoltaik-tool/service` (package `pv`, compose `pv`, port 6792) on the pinned GDAL image,
+  same server/auth pattern as farming. Bucket `pv-inspections`, MinIO user `pvtool` (S3 names need >= 3 chars).
+- Input: DJI R-JPEG thermal photos (`*_T.JPG`): 1280x1024 colour JPEG + APP3 raw 640x512 uint16 + XMP
+  drone-dji (GPS, gimbal, LRF target). Focal length from EXIF (M3T 9.1 mm, M4T 12 mm), pixel pitch 12 um.
+- Temperatures only via the DJI Thermal SDK CLI `dji_irp` (proprietary, never commit it): installed by
+  `photovoltaik-tool/tools/install-tsdk.sh` into edge/runtime/dji-tsdk, mounted at /opt/dji-tsdk.
+- Detection (detect.py): p75 block background, candidates >= min_delta, Delta-T against a 4 px ring (p75),
+  long (> half image) / large (> 5 %) areas dropped but searched for spots inside. Geo (geo.py): pinhole ray
+  onto a plane at LRF target height (roofs) or take-off height. Keep tests for both (synthetic scenes).

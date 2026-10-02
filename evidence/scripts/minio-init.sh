@@ -45,4 +45,17 @@ POL
 mc admin policy create local farming-rw /tmp/farming-policy.json || true
 mc admin user add local "$FARMING_MINIO_USER" "$FARMING_MINIO_PASSWORD"
 mc admin policy attach local farming-rw --user "$FARMING_MINIO_USER" || true
+# Photovoltaik Tool: own bucket for inspections, read access to the Pilot 2 uploads (thermal R-JPEGs)
+mc mb --ignore-existing "local/$PV_BUCKET"
+cat > /tmp/pv-policy.json <<POL
+{ "Version": "2012-10-17",
+  "Statement": [
+    { "Effect": "Allow", "Action": ["s3:GetObject", "s3:ListBucket"],
+      "Resource": ["arn:aws:s3:::$MINIO_BUCKET", "arn:aws:s3:::$MINIO_BUCKET/*"] },
+    { "Effect": "Allow", "Action": ["s3:*"],
+      "Resource": ["arn:aws:s3:::$PV_BUCKET", "arn:aws:s3:::$PV_BUCKET/*"] } ] }
+POL
+mc admin policy create local pv-rw /tmp/pv-policy.json || true
+mc admin user add local "$PV_MINIO_USER" "$PV_MINIO_PASSWORD"
+mc admin policy attach local pv-rw --user "$PV_MINIO_USER" || true
 echo "minio-init done"

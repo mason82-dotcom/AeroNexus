@@ -33,7 +33,7 @@ clone_and_patch () {  # dir repo commit patchdir
   echo "== $dir @ ${commit:0:7} + $(ls "$patches"/*.patch | wc -l) patch(es)"
 }
 
-mkdir -p $RT/upstream $RT/initdb $RT/emqx data/mysql data/redis data/emqx data/minio logs
+mkdir -p $RT/upstream $RT/initdb $RT/emqx $RT/dji-tsdk data/mysql data/redis data/emqx data/minio logs
 clone_and_patch $RT/upstream/backend "$BACKEND_REPO" "$BACKEND_COMMIT" "$ROOT/api/patches"
 clone_and_patch $RT/upstream/web     "$WEB_REPO"     "$WEB_COMMIT"     "$ROOT/control/patches"
 

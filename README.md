@@ -18,7 +18,7 @@ DJI Pilot 2 auf der Fernsteuerung verbindet sich direkt mit dem eigenen Server, 
 | AeroNexus Mission | `mission/` | Basis | Wegpunkt-Bibliothek. Eigene Missionsplanung geplant |
 | AeroNexus Mapping Tool | `mapping-tool/` | Basis | Leaflet-Karte (offline: Baden-Württemberg als Vektorkarte), Annotationen, Flugzonen, Kartierungsaufträge |
 | AeroNexus RTK | `rtk/` | geplant | Eigene RTK-Basis / NTRIP-Caster |
-| AeroNexus Photovoltaik Tool | `photovoltaik-tool/` | geplant | Thermografie-Auswertung von PV-Anlagen (M3T / M4T) |
+| AeroNexus Photovoltaik Tool | `photovoltaik-tool/` | Basis | Thermografie von PV-Anlagen (M3T / M4T): Hotspots mit ΔT, Klasse, Position, Bericht |
 | AeroNexus Farming Guide | `farming-guide/` | verfügbar | Multispektral-Auswertung (M3M): NDVI und Applikationskarten |
 | AeroNexus Photogrammetrie Addon | `photogrammetrie-addon/` | geplant | Orthofotos, 3D-Modelle (OpenDroneMap) |
 | AeroNexus Compute-Agent | `compute-agent/` | verfügbar | Rechenknoten (x64, Windows/WSL2 oder Linux): NodeODM, COG, Kacheln für das Mapping Tool |
@@ -63,6 +63,7 @@ Bisherige Patches:
 - **control 0018:** Livestream-Player schicken den Web-Login an MediaMTX (Abspielen nur angemeldet)
 - **control 0019:** Agora-SDK wird erst beim Öffnen des Agora-Players geladen (keine Konsolenfehler, Hauptpaket 1,2 MB kleiner)
 - **control 0020:** Offline-Karte (Vektorkarte als PMTiles, protomaps-leaflet) als Standard-Ebene
+- **control 0021:** Seite Photovoltaik: Inspektionen, Hotspots auf der Karte, Bildausschnitte, Status, Bericht/CSV/GeoJSON
 
 Prüfen, ob die Patches vollständig sind und sauber auf die gepinnten Commits passen: `edge/verify-patches.sh`
 
