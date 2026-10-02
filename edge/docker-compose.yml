@@ -11,7 +11,7 @@ x-restart: &restart
 services:
   mysql:
     <<: *restart
-    image: mysql:8.0.39
+    image: mysql:8.4.11
     command: ["--character-set-server=utf8mb4", "--collation-server=utf8mb4_general_ci"]
     environment:
       MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD}
@@ -178,7 +178,7 @@ services:
 
   mapping-db-init:
     # creates the restricted MySQL user of the mapping service (idempotent, every start)
-    image: mysql:8.0.39
+    image: mysql:8.4.11
     entrypoint: ["/bin/sh", "/init/init.sh"]
     environment:
       MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD}

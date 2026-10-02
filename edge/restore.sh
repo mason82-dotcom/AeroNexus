@@ -12,7 +12,8 @@ cd "$(dirname "$0")"
 set -a; source .env; set +a
 BACKUP_DIR="${BACKUP_DIR:-/mnt/hc4backup/aeronexus}"
 NET=aeronexus-edge_default
-MYSQL_IMAGE=mysql:8.0.39
+# same MySQL version as the live stack (override with MYSQL_IMAGE=... to test an upgrade)
+MYSQL_IMAGE="${MYSQL_IMAGE:-$(sed -n 's/^ *image: \(mysql:[0-9.]*\).*/\1/p' docker-compose.yml | head -1)}"
 MINIO_IMAGE=aeronexus/minio:RELEASE.2025-10-15T17-29-55Z
 
 mode="" dump=""
@@ -29,6 +30,7 @@ done
 [ -n "$dump" ] || dump="$(ls -1 "$BACKUP_DIR"/mysql/aeronexus-*.sql.gz 2>/dev/null | tail -1)"
 [ -f "$dump" ] || { echo "ERROR: no dump found in $BACKUP_DIR/mysql"; exit 1; }
 echo "dump:  $dump"
+echo "mysql: $MYSQL_IMAGE"
 echo "minio: $BACKUP_DIR/minio"
 
 # mc in a one-shot container on the compose network; aliases: live, test, local dir /backup

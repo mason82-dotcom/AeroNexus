@@ -77,6 +77,10 @@ Editing routes (mapping-tool/service/app/wpml.py, verified with Pilot 2 on RC Pr
   in Somalia). Edit values as text only, keep declaration, indentation and number style.
 
 ## Build notes
+- MySQL 8.4 LTS (upgraded in place from 8.0.39 on 2026-10-02, 8.0 is EOL). All users use caching_sha2_password;
+  mysql_native_password is off in 8.4, never create users with it. The 8.4 image has no mysqlcheck (use CHECK TABLE).
+  MySQL cannot be downgraded: before a server upgrade run backup.sh, `MYSQL_IMAGE=<new> ./restore.sh --test`,
+  slow shutdown (innodb_fast_shutdown=0) and a cold copy of edge/data/mysql.
 - Backend: Java 11 target, Spring Boot 2.7.12. Lombok forced to 1.18.36 (`-Dlombok.version`).
   Plugin `spring-boot-maven-plugin` pinned to 2.7.12 in `sample/pom.xml` (repackage).
 - Web: Vite 2 / Vue 3, Node 16. Config only via `VITE_*` build args.

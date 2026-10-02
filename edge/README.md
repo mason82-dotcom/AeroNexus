@@ -166,6 +166,11 @@ ersetzt die Datenbanken, schreibt die Objekte zurück und startet alles wieder.
 **Neuer Rechner / SD-Karte defekt:** Repo klonen, `BACKUP_DIR/config/env-<Zeit>` nach `edge/.env` kopieren
 (ggf. `SERVER_HOST` anpassen), `./setup.sh`, `docker compose up -d --build`, dann `./restore.sh --yes`.
 
+**MySQL-Version wechseln** (ein Downgrade ist bei MySQL nicht möglich): vorher `./backup.sh`, dann
+`MYSQL_IMAGE=mysql:<neu> ./restore.sh --test`, MySQL mit `SET GLOBAL innodb_fast_shutdown = 0` stoppen und
+`edge/data/mysql` kalt kopieren. So wurde am 02.10.2026 von 8.0.39 auf 8.4.11 umgestellt; die Kopie des
+8.0-Datenverzeichnisses liegt unter `BACKUP_DIR/mysql-datadir-8.0.39`.
+
 Die Sicherung liegt im selben Gerät wie der Server. Gegen Brand/Diebstahl hilft nur eine zusätzliche Kopie
 ausser Haus (z. B. `BACKUP_DIR` per Borg/rsync auf ein externes Ziel).
 
