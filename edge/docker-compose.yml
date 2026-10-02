@@ -95,6 +95,9 @@ services:
       MAPPING_MINIO_PASSWORD: ${MAPPING_MINIO_PASSWORD}
       MAPPING_RESULTS_BUCKET: mapping-results
       MAPPING_BASEMAPS_BUCKET: basemaps
+      FARMING_MINIO_USER: ${FARMING_MINIO_USER}
+      FARMING_MINIO_PASSWORD: ${FARMING_MINIO_PASSWORD}
+      FARMING_BUCKET: farming
     volumes:
       - ../evidence/scripts/minio-init.sh:/init/minio-init.sh:ro
     depends_on:
@@ -203,6 +206,28 @@ services:
       minio-init:
         condition: service_completed_successfully
 
+  farming:
+    <<: *restart
+    # AeroNexus Farming Guide: zone maps from vegetation index layers, Shapefile/KML/GeoJSON/ISO-XML export
+    build:
+      context: ../farming-guide/service
+    image: aeronexus/farming:local
+    environment:
+      JWT_SECRET: ${JWT_SECRET}
+      MAPPING_URL: http://mapping:6790
+      AWS_S3_ENDPOINT: minio:9000
+      AWS_ACCESS_KEY_ID: ${FARMING_MINIO_USER}
+      AWS_SECRET_ACCESS_KEY: ${FARMING_MINIO_PASSWORD}
+      AWS_REGION: us-east-1
+      TZ: Europe/Berlin
+    ports:
+      - "6791:6791"     # farming API (web UI)
+    depends_on:
+      minio-init:
+        condition: service_completed_successfully
+      mapping:
+        condition: service_started
+
   control:
     <<: *restart
     build:
@@ -214,6 +239,7 @@ services:
         VITE_BASE_URL: http://${SERVER_HOST}:6789/
         VITE_WS_URL: ws://${SERVER_HOST}:6789/api/v1/ws
         VITE_MAPPING_URL: http://${SERVER_HOST}:6790/
+        VITE_FARMING_URL: http://${SERVER_HOST}:6791/
         VITE_RTMP_URL: rtmp://${SERVER_HOST}:1935/live/
         VITE_WHEP_BASE: http://${SERVER_HOST}:8889/
         VITE_HLS_BASE: http://${SERVER_HOST}:8888/

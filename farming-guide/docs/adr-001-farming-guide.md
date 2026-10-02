@@ -30,6 +30,16 @@ und Applikationskarten (Shapefile, ISO-XML, KML/GeoJSON).
    nicht per Reihenfolge. Fehlt ein Band, entfaellt der Index mit Hinweis im Log, statt den Auftrag
    abzubrechen.
 
+7. **Zonen und Exporte (Stufe B) als eigener Dienst `farming-guide/service`** auf dem Pi, weil Zonen
+   interaktiv sind (Klassen/Mengen aendern, sofort sehen) und auch ohne x64-Knoten gehen muessen.
+   Gleiches gepinntes GDAL-Image wie der Agent, HTTP mit der Standardbibliothek (kein pip im Image),
+   MinIO ueber GDAL `/vsis3/` mit eigenem Benutzer `farming` (lesen `mapping-results`, schreiben `farming`).
+   Keine Datenbank: Zonenkarten liegen als `meta.json` + GeoJSON + Klassenraster im Bucket.
+   Layer werden ueber die Mapping-API mit dem Token des Nutzers nachgeschlagen (keine Rechte darueber hinaus).
+8. **ISO-XML** nach ISO 11783-10 v4.3: Grid Typ 1 (ein Byte Zonencode je Zelle, Ursprung Suedwest,
+   Zeilen nach Norden), TZN je Zone mit PDV (DDI 0006 mg/m2 bzw. 0001 mm3/m2 = Menge/ha * 100),
+   Zone 0 = ausserhalb mit Menge 0 (TSK H/I/J). Ohne Terminal-Test als experimentell gekennzeichnet.
+
 ## Folgen
 
 - Die echte ODM-Multispektralrechnung ist erst mit einem M3M-Flug und dem Windows-Knoten pruefbar;

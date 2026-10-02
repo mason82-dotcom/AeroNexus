@@ -31,4 +31,18 @@ POL
 mc admin policy create local mapping-rw /tmp/mapping-policy.json || true
 mc admin user add local "$MAPPING_MINIO_USER" "$MAPPING_MINIO_PASSWORD"
 mc admin policy attach local mapping-rw --user "$MAPPING_MINIO_USER" || true
+
+# Farming Guide: own bucket for zone maps/exports, read access to the mapping results (index COGs)
+mc mb --ignore-existing "local/$FARMING_BUCKET"
+cat > /tmp/farming-policy.json <<POL
+{ "Version": "2012-10-17",
+  "Statement": [
+    { "Effect": "Allow", "Action": ["s3:GetObject", "s3:ListBucket"],
+      "Resource": ["arn:aws:s3:::$MAPPING_RESULTS_BUCKET", "arn:aws:s3:::$MAPPING_RESULTS_BUCKET/*"] },
+    { "Effect": "Allow", "Action": ["s3:*"],
+      "Resource": ["arn:aws:s3:::$FARMING_BUCKET", "arn:aws:s3:::$FARMING_BUCKET/*"] } ] }
+POL
+mc admin policy create local farming-rw /tmp/farming-policy.json || true
+mc admin user add local "$FARMING_MINIO_USER" "$FARMING_MINIO_PASSWORD"
+mc admin policy attach local farming-rw --user "$FARMING_MINIO_USER" || true
 echo "minio-init done"
