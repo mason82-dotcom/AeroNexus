@@ -61,5 +61,12 @@ New device = DeviceTypeEnum + DeviceEnum (+ GatewayTypeEnum if it is a gateway/R
   compose already take BROKER_*, DRC_*, OSS_ENDPOINT, WHIP_URL from env for that. Never pass MQTT_* env
   into the api container: Spring relaxed binding maps it onto the mqtt.{BASIC,DRC} map and startup fails.
   DJI states only GoDaddy and Cloudflare certs are supported; Pilot 2 MQTT reportedly works with wss:// but not ssl://.
-- Compose service names: api (backend), control (web).
+- Compose service names: api (backend), control (web), mapping (mapping-tool/service, port 6790).
+
+## Mapping tool
+- Own FastAPI service `mapping-tool/service`, NOT a patch on the DJI backend (ADR-001).
+  Own DB `mapping`, migrations = numbered SQL files applied on start. Auth: DJI JWT (x-auth-token)
+  for the web, `MAPPING_AGENT_TOKEN` bearer for the compute agent. Agent API: mapping-tool/docs/agent-api.md.
+- Results in bucket `mapping-results/{jobId}/`, tiles via 302 to presigned URLs (bucket stays private).
+- Test without x64 node: `python3 mapping-tool/service/tools/sim_agent.py`.
 - Host ports on the dev Pi: MQTT 1884, MQTT-WS 8084, web 8085 (1883/8083/8080 taken by other services).

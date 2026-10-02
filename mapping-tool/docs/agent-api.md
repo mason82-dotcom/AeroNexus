@@ -147,5 +147,7 @@ Antwort `200`: `{"status": "FAILED"}`. `error` hoechstens 2000 Zeichen.
 
 ## Simulation
 
-`mapping-tool/service/tools/sim-agent.sh` spielt den Ablauf ohne x64-Knoten durch
-(Claim, Lease-Ablauf, Upload von Testkacheln, Complete).
+`python3 mapping-tool/service/tools/sim_agent.py` spielt den Ablauf ohne x64-Knoten durch
+(nur Python-Standardbibliothek, liest `edge/.env`): Auftrag anlegen, Claim mit kurzer Lease,
+Lease ablaufen lassen (409 fuer den alten Agenten, Auftrag wieder `QUEUED`), erneuter Claim,
+Upload erzeugter Testkacheln und `manifest.json`, `complete`, Layer und Kachel pruefen.
