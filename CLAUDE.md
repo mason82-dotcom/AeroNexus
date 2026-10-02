@@ -13,6 +13,9 @@ Self-hosted drone platform on DJI Cloud API (DJI Pilot 2 -> own server). Monorep
 - All container images strictly pinned (no `latest`, no floating tags).
 - Secrets only in `edge/.env` (gitignored). `edge/.env.example` is the committed template.
 - Generated files live in `edge/runtime/` (gitignored), data in `edge/data/`, logs in `edge/logs/`.
+  Backup: `edge/backup.sh` (daily cron) -> BACKUP_DIR; `edge/restore.sh --test` verifies a restore in
+  throwaway containers. A new database must be added to DATABASES (backup.sh) and the schema list in
+  restore.sh; MinIO buckets are discovered automatically.
 - `SERVER_HOST` must be reachable from the remote controller. Never put docker hostnames into
   anything that is handed to DJI Pilot 2 (MQTT host, OSS endpoint, RTMP URL, web base URL).
 - ASCII-only source/config files. Single exception: `control` web `src/locales/de.ts` (German UI texts,

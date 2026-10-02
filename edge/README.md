@@ -132,6 +132,32 @@ Weitere Wege zum selben Stream:
 - **SQL-Änderungen greifen nicht:** MySQL war schon initialisiert. Dann `runtime/initdb/02_*.sql` und `03_*.sql`
   per `docker compose exec -T mysql mysql -uroot -p... < datei.sql` einspielen.
 
+## Datensicherung
+
+`edge/backup.sh` sichert täglich um 03:15 (Cron, eingerichtet mit `./backup.sh --install-cron`) nach
+`BACKUP_DIR` (Standard `/mnt/hc4backup/aeronexus`, eigene NVMe, nicht die SD-Karte):
+
+| Was | Wohin | Aufbewahrung |
+|---|---|---|
+| MySQL `cloud_sample` + `mapping` (konsistenter Dump im laufenden Betrieb) | `mysql/aeronexus-<Zeit>.sql.gz` | `BACKUP_KEEP_DAYS` (14) |
+| alle MinIO-Buckets (Fotos, Ergebnisse, Farming) | `minio/<bucket>/` | Spiegel, inkrementell; in MinIO gelöschte Dateien bleiben erhalten |
+| `edge/.env` (alle Passwörter) | `config/env-<Zeit>` (nur für den Besitzer lesbar) | wie MySQL |
+
+Kontrolle: `BACKUP_DIR/last-success` (Zeitpunkt des letzten erfolgreichen Laufs), Protokoll in `BACKUP_DIR/backup.log`.
+
+**Wiederherstellung prüfen** (fasst den laufenden Stack nicht an, etwa monatlich):
+`./restore.sh --test` spielt die neueste Sicherung in Wegwerf-Container ein und vergleicht Zeilen pro Tabelle
+sowie Objekte und Bytes pro Bucket mit dem Live-Stand.
+
+**Wiederherstellen** in den laufenden Stack: `./restore.sh --yes [--dump DATEI]`. Stoppt api/mapping/farming,
+ersetzt die Datenbanken, schreibt die Objekte zurück und startet alles wieder.
+
+**Neuer Rechner / SD-Karte defekt:** Repo klonen, `BACKUP_DIR/config/env-<Zeit>` nach `edge/.env` kopieren
+(ggf. `SERVER_HOST` anpassen), `./setup.sh`, `docker compose up -d --build`, dann `./restore.sh --yes`.
+
+Die Sicherung liegt im selben Gerät wie der Server. Gegen Brand/Diebstahl hilft nur eine zusätzliche Kopie
+ausser Haus (z. B. `BACKUP_DIR` per Borg/rsync auf ein externes Ziel).
+
 ## Sicherheit
 
 Nur für LAN/VPN gedacht. Alles läuft unverschlüsselt (HTTP, MQTT ohne TLS).
