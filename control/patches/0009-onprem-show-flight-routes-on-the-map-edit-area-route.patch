@@ -1,0 +1,467 @@
+From 3cc29d1fae8481cbc00d32cf94afb1e2527d46f1 Mon Sep 17 00:00:00 2001
+From: aeronexus <aeronexus@local>
+Date: Fri, 2 Oct 2026 16:27:50 +0200
+Subject: [PATCH] onprem: show flight routes on the map, edit area routes as
+ copy
+
+Flight Route Library: clicking a route shows its area and the flight path
+computed by Pilot 2 on the Leaflet map (data from the mapping service).
+mapping2d routes can be edited as a copy: drag/add/delete polygon corners,
+height, direction, margin, overlap, speed; saved as a new library route.
+Other template types are shown read-only.
+---
+ src/api/mapping.ts                      |  30 ++++
+ src/components/wayline/RouteEditor.vue  | 205 ++++++++++++++++++++++++
+ src/hooks/use-route-overlay.ts          | 120 ++++++++++++++
+ src/pages/page-web/projects/wayline.vue |  30 +++-
+ 4 files changed, 384 insertions(+), 1 deletion(-)
+ create mode 100644 src/components/wayline/RouteEditor.vue
+ create mode 100644 src/hooks/use-route-overlay.ts
+
+diff --git a/src/api/mapping.ts b/src/api/mapping.ts
+index 3720090..89f3256 100644
+--- a/src/api/mapping.ts
++++ b/src/api/mapping.ts
+@@ -82,3 +82,33 @@ export async function getMappingLayers (): Promise<MappingLayer[]> {
+ export function layerTileUrl (layer: MappingLayer): string {
+   return mappingBase() + layer.tile_url + '?token=' + encodeURIComponent(authToken())
+ }
++
++// ---- flight routes (wayline library), read and edited copies via the mapping service
++
++export interface RouteParams {
++  height: number
++  direction: number
++  margin: number
++  overlap_h: number
++  overlap_w: number
++  speed: number
++}
++
++export interface RouteGeometry {
++  id: string
++  name: string
++  drone_model_key: string
++  template_type: string
++  editable: boolean
++  polygon: [number, number][] | null // [lon, lat]
++  params: RouteParams & { height_mode: string | null, surface_follow: boolean }
++  flight_path: [number, number, number][] // [lon, lat, height]
++}
++
++export async function getRouteGeometry (waylineId: string): Promise<RouteGeometry> {
++  return (await http.get(`/api/mapping/waylines/${waylineId}`)).data
++}
++
++export async function copyRoute (waylineId: string, body: { name: string, polygon: [number, number][], params: RouteParams }): Promise<{ id: string, name: string }> {
++  return (await http.post(`/api/mapping/waylines/${waylineId}/copy`, body)).data
++}
+diff --git a/src/components/wayline/RouteEditor.vue b/src/components/wayline/RouteEditor.vue
+new file mode 100644
+index 0000000..39a6d2a
+--- /dev/null
++++ b/src/components/wayline/RouteEditor.vue
+@@ -0,0 +1,205 @@
++<template>
++  <teleport to="body">
++  <div class="route-editor" v-if="routeState.route">
++    <div class="head">
++      <span class="title" :title="routeState.route.name">{{ routeState.route.name }}</span>
++      <a @click="close"><CloseOutlined /></a>
++    </div>
++    <div class="meta">
++      {{ routeState.route.template_type }}, {{ routeState.polygon.length }} corners,
++      {{ routeState.route.flight_path.length }} waypoints computed by Pilot 2
++    </div>
++
++    <template v-if="!routeState.editing">
++      <div class="params">
++        <span>Height {{ fmt(p.height) }} m</span>
++        <span v-if="p.direction !== null">Direction {{ fmt(p.direction) }} deg</span>
++        <span v-if="p.overlap_h !== null">Overlap {{ fmt(p.overlap_h) }} / {{ fmt(p.overlap_w) }} %</span>
++        <span v-if="p.speed !== null">Speed {{ fmt(p.speed) }} m/s</span>
++      </div>
++      <a-button v-if="routeState.route.editable" type="primary" size="small" @click="beginEdit">Edit as copy</a-button>
++      <div v-else class="hint warn">
++        {{ routeState.route.template_type }} routes are shown only. Area routes (mapping2d) can be edited
++        here; edit this route in Pilot 2.
++      </div>
++    </template>
++
++    <template v-else>
++      <div class="hint">
++        Drag corners to move them, click a small dot to add a corner, right-click a corner to delete it.
++        The grey line is the old flight path: Pilot 2 recomputes the route from the area when the copy is opened.
++      </div>
++      <a-form layout="horizontal" :label-col="{ span: 10 }" :wrapper-col="{ span: 14 }" class="form">
++        <a-form-item label="Name of the copy">
++          <a-input v-model:value="form.name" size="small" :maxlength="60" />
++        </a-form-item>
++        <a-form-item :label="'Height (m)' + (p.surface_follow ? ', terrain follow' : '')">
++          <a-input-number v-model:value="form.height" size="small" :min="10" :max="500" :step="1" />
++        </a-form-item>
++        <a-form-item label="Direction (deg)">
++          <a-input-number v-model:value="form.direction" size="small" :min="0" :max="359" :step="1" />
++        </a-form-item>
++        <a-form-item label="Margin (m)">
++          <a-input-number v-model:value="form.margin" size="small" :min="0" :max="200" :step="1" />
++        </a-form-item>
++        <a-form-item label="Overlap along (%)">
++          <a-input-number v-model:value="form.overlap_h" size="small" :min="10" :max="90" :step="5" />
++        </a-form-item>
++        <a-form-item label="Overlap across (%)">
++          <a-input-number v-model:value="form.overlap_w" size="small" :min="10" :max="90" :step="5" />
++        </a-form-item>
++        <a-form-item label="Speed (m/s)">
++          <a-input-number v-model:value="form.speed" size="small" :min="1" :max="15" :step="0.5" />
++        </a-form-item>
++      </a-form>
++      <div class="hint warn">Check the copy in Pilot 2 before flying.</div>
++      <div class="buttons">
++        <a-button size="small" @click="cancel">Cancel</a-button>
++        <a-button size="small" type="primary" :loading="saving" :disabled="!form.name.trim()" @click="save">Save as copy</a-button>
++      </div>
++    </template>
++  </div>
++  </teleport>
++</template>
++
++<script lang="ts" setup>
++import { computed, defineEmits, reactive, ref } from 'vue'
++import { message } from 'ant-design-vue'
++import { CloseOutlined } from '@ant-design/icons-vue'
++import { copyRoute } from '/@/api/mapping'
++import { routeState, useRouteOverlay } from '/@/hooks/use-route-overlay'
++
++const emit = defineEmits<{ (e: 'saved'): void }>()
++const { clear, startEdit, cancelEdit } = useRouteOverlay()
++const saving = ref(false)
++const p = computed(() => routeState.route!.params)
++const form = reactive({ name: '', height: 0, direction: 0, margin: 0, overlap_h: 80, overlap_w: 80, speed: 10 })
++
++function fmt (v: number | null): string {
++  return v === null || v === undefined ? '-' : String(Math.round(v * 10) / 10)
++}
++
++function beginEdit () {
++  const r = routeState.route!
++  Object.assign(form, {
++    name: (r.name + '-edit').replace(/[^A-Za-z0-9 _().-]/g, '_').slice(0, 60),
++    height: r.params.height,
++    direction: Math.round(r.params.direction ?? 0),
++    margin: Math.round(r.params.margin ?? 0),
++    overlap_h: Math.round(r.params.overlap_h ?? 80),
++    overlap_w: Math.round(r.params.overlap_w ?? 80),
++    speed: r.params.speed ?? 10,
++  })
++  startEdit()
++}
++
++function cancel () {
++  cancelEdit()
++}
++
++function close () {
++  clear()
++}
++
++async function save () {
++  saving.value = true
++  try {
++    const r = routeState.route!
++    const result = await copyRoute(r.id, {
++      name: form.name.trim(),
++      polygon: routeState.polygon,
++      params: {
++        height: form.height,
++        direction: form.direction,
++        margin: form.margin,
++        overlap_h: form.overlap_h,
++        overlap_w: form.overlap_w,
++        speed: form.speed,
++      },
++    })
++    message.success(`Saved as new route "${result.name}". Pilot 2 syncs it into its library.`)
++    clear()
++    emit('saved')
++  } catch (e: any) {
++    const detail = e?.response?.data?.detail
++    const text = Array.isArray(detail) ? detail.map((d: any) => d.msg).join('; ') : (detail || String(e))
++    message.error('Saving failed: ' + text, 8)
++  } finally {
++    saving.value = false
++  }
++}
++</script>
++
++<style lang="scss" scoped>
++.route-editor {
++  position: fixed;
++  z-index: 1000;
++  left: 0;
++  top: 10px;
++  margin-left: 345px;
++  width: 340px;
++  max-height: calc(100vh - 20px);
++  overflow-y: auto;
++  background: #232323;
++  color: #fff;
++  border-radius: 4px;
++  padding: 10px 12px;
++  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.5);
++}
++.head {
++  display: flex;
++  justify-content: space-between;
++  align-items: center;
++  font-weight: 600;
++  a { color: #fff; }
++}
++.title {
++  overflow: hidden;
++  text-overflow: ellipsis;
++  white-space: nowrap;
++}
++.meta, .hint {
++  font-size: 12px;
++  color: #aaa;
++  margin: 6px 0;
++}
++.warn {
++  color: #faad14;
++}
++.params {
++  display: flex;
++  flex-wrap: wrap;
++  gap: 4px 12px;
++  font-size: 12px;
++  margin-bottom: 8px;
++}
++.form :deep(.ant-form-item) {
++  margin-bottom: 6px;
++}
++.form :deep(.ant-form-item-label > label) {
++  color: #ddd;
++  font-size: 12px;
++}
++.buttons {
++  display: flex;
++  justify-content: flex-end;
++  gap: 8px;
++}
++</style>
++
++<style lang="scss">
++/* Leaflet divIcons of the route editor (not scoped: they live in the map pane) */
++.route-vertex {
++  background: #ffffff;
++  border: 2px solid #2d8cf0;
++  border-radius: 2px;
++  cursor: move;
++}
++.route-vertex-mid {
++  background: #2d8cf0;
++  border-color: #ffffff;
++  border-radius: 50%;
++  opacity: 0.7;
++  cursor: copy;
++}
++</style>
+diff --git a/src/hooks/use-route-overlay.ts b/src/hooks/use-route-overlay.ts
+new file mode 100644
+index 0000000..d479359
+--- /dev/null
++++ b/src/hooks/use-route-overlay.ts
+@@ -0,0 +1,120 @@
++// Flight route on the shared Leaflet map: area polygon, computed flight path, polygon vertex editing.
++// One route at a time; module-level state so the page and the editor share it.
++import L from 'leaflet'
++import { reactive } from 'vue'
++import { getRoot } from '/@/root'
++import { RouteGeometry } from '/@/api/mapping'
++
++type LonLat = [number, number]
++
++export const routeState = reactive<{ route: RouteGeometry | null, editing: boolean, polygon: LonLat[] }>({
++  route: null,
++  editing: false,
++  polygon: [],
++})
++
++let group: L.LayerGroup | null = null
++let areaLayer: L.Polygon | null = null
++let pathLayer: L.Polyline | null = null
++let handles: L.LayerGroup | null = null
++
++function map (): L.Map | undefined {
++  return getRoot()?.$map?.leaflet
++}
++
++const toLatLng = (p: LonLat): L.LatLngExpression => [p[1], p[0]]
++
++function vertexIcon (): L.DivIcon {
++  return L.divIcon({ className: 'route-vertex', iconSize: [12, 12], html: '' })
++}
++
++function midIcon (): L.DivIcon {
++  return L.divIcon({ className: 'route-vertex route-vertex-mid', iconSize: [10, 10], html: '' })
++}
++
++function redrawArea () {
++  areaLayer?.setLatLngs(routeState.polygon.map(toLatLng))
++}
++
++function rebuildHandles () {
++  handles?.clearLayers()
++  if (!handles || !routeState.editing) return
++  const poly = routeState.polygon
++  poly.forEach((p, i) => {
++    const m = L.marker(toLatLng(p), { icon: vertexIcon(), draggable: true, keyboard: false, zIndexOffset: 1000 })
++    m.bindTooltip('Drag to move, right-click to delete', { direction: 'top', offset: [0, -8] })
++    m.on('drag', (e: any) => {
++      const ll = e.target.getLatLng()
++      routeState.polygon[i] = [ll.lng, ll.lat]
++      redrawArea()
++    })
++    m.on('dragend', rebuildHandles)
++    m.on('contextmenu', () => {
++      if (routeState.polygon.length <= 3) return
++      routeState.polygon.splice(i, 1)
++      redrawArea()
++      rebuildHandles()
++    })
++    handles!.addLayer(m)
++    // midpoint handle: click inserts a new vertex
++    const q = poly[(i + 1) % poly.length]
++    const mid: LonLat = [(p[0] + q[0]) / 2, (p[1] + q[1]) / 2]
++    const mm = L.marker(toLatLng(mid), { icon: midIcon(), keyboard: false, zIndexOffset: 900 })
++    mm.bindTooltip('Click to add a corner', { direction: 'top', offset: [0, -6] })
++    mm.on('click', () => {
++      routeState.polygon.splice(i + 1, 0, mid)
++      redrawArea()
++      rebuildHandles()
++    })
++    handles!.addLayer(mm)
++  })
++}
++
++export function useRouteOverlay () {
++  function clear () {
++    group?.remove()
++    group = areaLayer = pathLayer = handles = null
++    routeState.route = null
++    routeState.editing = false
++    routeState.polygon = []
++  }
++
++  function show (route: RouteGeometry, fit = true) {
++    const m = map()
++    if (!m) return
++    clear()
++    routeState.route = route
++    routeState.polygon = (route.polygon || []).map(p => [p[0], p[1]] as LonLat)
++    group = L.layerGroup().addTo(m)
++    if (routeState.polygon.length) {
++      areaLayer = L.polygon(routeState.polygon.map(toLatLng), { color: '#2d8cf0', weight: 2, fillOpacity: 0.15 })
++        .bindTooltip(route.name, { sticky: true })
++      group.addLayer(areaLayer)
++    }
++    if (route.flight_path.length) {
++      pathLayer = L.polyline(route.flight_path.map(p => [p[1], p[0]] as L.LatLngExpression), { color: '#ff9900', weight: 2 })
++      group.addLayer(pathLayer)
++      const s = route.flight_path[0]
++      group.addLayer(L.circleMarker([s[1], s[0]], { radius: 6, color: '#ffffff', fillColor: '#19be6b', fillOpacity: 1, weight: 2 })
++        .bindTooltip('Start of the computed flight path'))
++    }
++    handles = L.layerGroup().addTo(group)
++    const target = areaLayer || pathLayer
++    if (fit && target) m.fitBounds(target.getBounds(), { padding: [40, 40], maxZoom: 19 })
++  }
++
++  function startEdit () {
++    if (!routeState.route?.editable || !areaLayer) return
++    routeState.editing = true
++    // the old flight path no longer matches the edited area: Pilot 2 recomputes it
++    pathLayer?.setStyle({ color: '#999999', dashArray: '4 6', opacity: 0.6 })
++    rebuildHandles()
++  }
++
++  function cancelEdit () {
++    const route = routeState.route
++    if (route) show(route, false)
++  }
++
++  return { show, clear, startEdit, cancelEdit }
++}
+diff --git a/src/pages/page-web/projects/wayline.vue b/src/pages/page-web/projects/wayline.vue
+index 1387dd8..60dc801 100644
+--- a/src/pages/page-web/projects/wayline.vue
++++ b/src/pages/page-web/projects/wayline.vue
+@@ -39,6 +39,9 @@
+                   </a>
+                   <template #overlay>
+                     <a-menu theme="dark" class="more" style="background: #3c3c3c;">
++                      <a-menu-item v-if="importVisible" @click="showOnMap(wayline)">
++                        <span>Show on map / edit</span>
++                      </a-menu-item>
+                       <a-menu-item @click="downloadWayline(wayline.id, wayline.name)">
+                         <span>Download</span>
+                       </a-menu-item>
+@@ -77,13 +80,14 @@
+       </a-modal>
+     </div>
+     </a-spin>
++    <RouteEditor v-if="importVisible" @saved="reloadWaylines" />
+   </div>
+ </template>
+ 
+ <script lang="ts" setup>
+ import { reactive } from '@vue/reactivity'
+ import { message } from 'ant-design-vue'
+-import { onMounted, onUpdated, ref } from 'vue'
++import { onMounted, onUnmounted, onUpdated, ref } from 'vue'
+ import { deleteWaylineFile, downloadWaylineFile, getWaylineFiles, importKmzFile } from '/@/api/wayline'
+ import { ELocalStorageKey, ERouterName } from '/@/types'
+ import { EllipsisOutlined, RocketOutlined, CameraFilled, UserOutlined, SelectOutlined } from '@ant-design/icons-vue'
+@@ -94,6 +98,9 @@ import { downloadFile } from '/@/utils/common'
+ import { IPage } from '/@/api/http/type'
+ import { CURRENT_CONFIG } from '/@/api/http/config'
+ import { getRoot } from '/@/root'
++import RouteEditor from '/@/components/wayline/RouteEditor.vue'
++import { getRouteGeometry } from '/@/api/mapping'
++import { useRouteOverlay } from '/@/hooks/use-route-overlay'
+ 
+ const loading = ref(false)
+ const store = useMyStore()
+@@ -186,7 +193,28 @@ function downloadWayline (waylineId: string, fileName: string) {
+ 
+ function selectRoute (wayline: WaylineFile) {
+   store.commit('SET_SELECT_WAYLINE_INFO', wayline)
++  if (importVisible.value) {
++    showOnMap(wayline)
++  }
++}
++
++// onprem: route geometry from the mapping service (area, computed flight path), editable as copy
++const routeOverlay = useRouteOverlay()
++async function showOnMap (wayline: WaylineFile) {
++  try {
++    routeOverlay.show(await getRouteGeometry(wayline.id))
++  } catch (e) {
++    message.error('Route cannot be shown: mapping service not reachable or file unreadable')
++  }
++}
++function reloadWaylines () {
++  canRefresh.value = true
++  pagination.total = 0
++  pagination.page = 1
++  waylinesData.data = []
++  getWaylines()
+ }
++onUnmounted(() => routeOverlay.clear())
+ 
+ function onScroll (e: any) {
+   const element = e.srcElement
+-- 
+2.47.3
+

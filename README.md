@@ -47,6 +47,7 @@ Bisherige Patches:
 - **control 0006:** Annotationen landen auch beim Zeichnen ausserhalb der Annotations-Seite in der richtigen Ebene
 - **control 0007:** Seite Mapping: Auftraege, Bildauswahl aus den Medien, Ergebnis-Layer in der Karte
 - **control 0008:** Livestream-Hinweis: beim RC zeigt der Stream das in Pilot 2 gewaehlte Objektiv
+- **control 0009:** Flugrouten auf der Karte (Flaeche + berechnete Bahn), Flaechenrouten als Kopie bearbeiten
 
 ## Schnellstart
 
