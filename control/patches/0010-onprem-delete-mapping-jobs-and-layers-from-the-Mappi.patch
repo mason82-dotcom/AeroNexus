@@ -1,0 +1,125 @@
+From bd60df5f650e8e0f9995bf86eb985f52582a3d6c Mon Sep 17 00:00:00 2001
+From: aeronexus <aeronexus@local>
+Date: Fri, 2 Oct 2026 17:47:15 +0200
+Subject: [PATCH] onprem: delete mapping jobs and layers from the Mapping page
+
+Delete buttons with confirmation for result layers (layer + tiles) and jobs
+(job, results, layers). Jobs held by a compute node show no delete button.
+A deleted layer is also removed from the map.
+---
+ src/api/mapping.ts                      |  8 +++++
+ src/pages/page-web/projects/mapping.vue | 45 +++++++++++++++++++++++--
+ 2 files changed, 50 insertions(+), 3 deletions(-)
+
+diff --git a/src/api/mapping.ts b/src/api/mapping.ts
+index 89f3256..9ecc9a4 100644
+--- a/src/api/mapping.ts
++++ b/src/api/mapping.ts
+@@ -74,6 +74,14 @@ export async function createMappingJob (body: { name: string, image_keys: string
+   return (await http.post('/api/mapping/jobs', body)).data
+ }
+ 
++export async function deleteMappingJob (jobId: string): Promise<{ deleted_objects: number, deleted_layers: number }> {
++  return (await http.delete(`/api/mapping/jobs/${jobId}`)).data
++}
++
++export async function deleteMappingLayer (layerId: string): Promise<{ deleted_objects: number }> {
++  return (await http.delete(`/api/mapping/layers/${layerId}`)).data
++}
++
+ export async function getMappingLayers (): Promise<MappingLayer[]> {
+   return (await http.get('/api/mapping/layers')).data
+ }
+diff --git a/src/pages/page-web/projects/mapping.vue b/src/pages/page-web/projects/mapping.vue
+index bc60e63..ae3da17 100644
+--- a/src/pages/page-web/projects/mapping.vue
++++ b/src/pages/page-web/projects/mapping.vue
+@@ -14,6 +14,10 @@
+             <a-switch size="small" :checked="!!layerState.visible[layer.id]" @change="(v) => toggle(layer, v)" />
+             <span class="name" :title="layer.name">{{ layer.name }}</span>
+             <a v-if="layer.bounds_wgs84" title="Zoom to result" @click="zoomTo(layer)"><AimOutlined /></a>
++            <a-popconfirm title="Delete this layer and its tiles? The job results (COG, report) stay."
++                          ok-text="Delete" cancel-text="Cancel" @confirm="removeLayer(layer)">
++              <a title="Delete layer" class="danger"><DeleteOutlined /></a>
++            </a-popconfirm>
+           </div>
+           <div class="row">
+             <span class="label">Opacity</span>
+@@ -35,6 +39,11 @@
+           <div class="row">
+             <span class="name" :title="job.name">{{ job.name }}</span>
+             <a-tag :color="statusColor[job.status]">{{ job.status }}</a-tag>
++            <a-popconfirm v-if="job.status !== 'CLAIMED' && job.status !== 'RUNNING'"
++                          title="Delete this job with all results and its map layer?"
++                          ok-text="Delete" cancel-text="Cancel" @confirm="removeJob(job)">
++              <a title="Delete job" class="danger"><DeleteOutlined /></a>
++            </a-popconfirm>
+           </div>
+           <a-progress v-if="job.status === 'RUNNING' || job.status === 'CLAIMED'" :percent="Math.round(job.progress)" size="small" />
+           <div class="meta">
+@@ -76,15 +85,15 @@
+ <script lang="ts" setup>
+ import { computed, onMounted, onUnmounted, reactive, ref } from 'vue'
+ import { message } from 'ant-design-vue'
+-import { AimOutlined, ReloadOutlined } from '@ant-design/icons-vue'
++import { AimOutlined, DeleteOutlined, ReloadOutlined } from '@ant-design/icons-vue'
+ import Title from '/@/components/workspace/Title.vue'
+ import {
+   MappingJob, MappingLayer, MappingMedia, MappingProfile,
+-  createMappingJob, getMappingJobs, getMappingLayers, getMappingMedia,
++  createMappingJob, deleteMappingJob, deleteMappingLayer, getMappingJobs, getMappingLayers, getMappingMedia,
+ } from '/@/api/mapping'
+ import { layerState, useMappingLayers } from '/@/hooks/use-mapping-layers'
+ 
+-const { toggle, setOpacity, zoomTo } = useMappingLayers()
++const { toggle, hide, setOpacity, zoomTo } = useMappingLayers()
+ 
+ const jobs = ref<MappingJob[]>([])
+ const layers = ref<MappingLayer[]>([])
+@@ -114,6 +123,33 @@ async function refresh () {
+   }
+ }
+ 
++function errorText (e: any): string {
++  const detail = e?.response?.data?.detail
++  return typeof detail === 'string' ? detail : (detail ? JSON.stringify(detail) : String(e))
++}
++
++async function removeLayer (layer: MappingLayer) {
++  try {
++    await deleteMappingLayer(layer.id)
++    hide(layer.id)
++    message.success(`Layer "${layer.name}" deleted`)
++  } catch (e) {
++    message.error('Deleting the layer failed: ' + errorText(e))
++  }
++  await refresh()
++}
++
++async function removeJob (job: MappingJob) {
++  try {
++    await deleteMappingJob(job.id)
++    layers.value.filter(l => l.job_id === job.id).forEach(l => hide(l.id))
++    message.success(`Job "${job.name}" deleted`)
++  } catch (e) {
++    message.error('Deleting the job failed: ' + errorText(e))
++  }
++  await refresh()
++}
++
+ async function openCreate () {
+   createVisible.value = true
+   form.name = ''
+@@ -206,6 +242,9 @@ onUnmounted(() => window.clearInterval(timer))
+   color: #ff7875;
+   word-break: break-word;
+ }
++.danger {
++  color: #ff7875;
++}
+ .media-tools a {
+   margin-right: 12px;
+ }
+-- 
+2.47.3
+
