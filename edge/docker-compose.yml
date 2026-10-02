@@ -152,6 +152,34 @@ services:
       minio-init:
         condition: service_completed_successfully
 
+  mapping:
+    <<: *restart
+    # AeroNexus Mapping Tool: jobs, compute-agent API, map layers (mapping-tool/docs/adr-001-architektur.md)
+    build:
+      context: ../mapping-tool/service
+    image: aeronexus/mapping:local
+    environment:
+      SERVER_HOST: ${SERVER_HOST}
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD}
+      JWT_SECRET: ${JWT_SECRET}
+      MAPPING_AGENT_TOKEN: ${MAPPING_AGENT_TOKEN}
+      PRESIGN_TTL_SECONDS: ${PRESIGN_TTL_SECONDS}
+      MAPPING_MINIO_USER: ${MAPPING_MINIO_USER}
+      MAPPING_MINIO_PASSWORD: ${MAPPING_MINIO_PASSWORD}
+      MINIO_BUCKET: ${MINIO_BUCKET}
+      # presigned URLs must use an address the x64 agent and browsers can reach, never a docker hostname
+      MINIO_PUBLIC_ENDPOINT: ${SERVER_HOST}:9000
+      WOL_MAC: ${WOL_MAC}
+      WOL_BROADCAST: ${WOL_BROADCAST}
+      TZ: Europe/Berlin
+    ports:
+      - "6790:6790"     # mapping API (web UI + compute agent)
+    depends_on:
+      mysql:
+        condition: service_healthy
+      minio-init:
+        condition: service_completed_successfully
+
   control:
     <<: *restart
     build:

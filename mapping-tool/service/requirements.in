@@ -1,0 +1,5 @@
+fastapi==0.142.2
+uvicorn==0.54.0
+pymysql==1.2.3
+minio==7.2.20
+pyjwt==2.15.1
