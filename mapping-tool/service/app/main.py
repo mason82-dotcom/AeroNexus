@@ -1,5 +1,6 @@
 """AeroNexus mapping service: jobs, agent API and map layers (see docs/adr-001-architektur.md)."""
 import logging
+import re
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
@@ -11,6 +12,18 @@ from .storage import Storage
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
 log = logging.getLogger("mapping")
+
+
+class _RedactToken(logging.Filter):
+    """Tile URLs carry the login JWT as ?token=...; keep it out of the access log."""
+    def filter(self, record: logging.LogRecord) -> bool:
+        if isinstance(record.args, tuple):
+            record.args = tuple(re.sub(r"token=[^&\s]+", "token=***", a) if isinstance(a, str) else a
+                                for a in record.args)
+        return True
+
+
+logging.getLogger("uvicorn.access").addFilter(_RedactToken())
 
 settings = config.load()
 storage = Storage(settings)

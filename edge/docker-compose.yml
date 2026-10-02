@@ -4,6 +4,9 @@ name: aeronexus-edge
 
 x-restart: &restart
   restart: unless-stopped
+  logging: &logging
+    driver: json-file
+    options: { max-size: "10m", max-file: "3" }   # docker's default keeps container logs forever
 
 services:
   mysql:
@@ -103,6 +106,7 @@ services:
     depends_on:
       - minio
     restart: "no"
+    logging: *logging
 
   mediamtx:
     <<: *restart
@@ -174,6 +178,7 @@ services:
       mysql:
         condition: service_healthy
     restart: "no"
+    logging: *logging
 
   mapping:
     <<: *restart
@@ -200,6 +205,12 @@ services:
       - mapping-cache:/cache       # media thumbnails (regenerated on demand if lost)
     ports:
       - "6790:6790"     # mapping API (web UI + compute agent)
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:6790/health', timeout=4)"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
     depends_on:
       mapping-db-init:
         condition: service_completed_successfully
@@ -222,11 +233,17 @@ services:
       TZ: Europe/Berlin
     ports:
       - "6791:6791"     # farming API (web UI)
+    healthcheck:
+      test: ["CMD", "python3", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:6791/health', timeout=4)"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
     depends_on:
       minio-init:
         condition: service_completed_successfully
       mapping:
-        condition: service_started
+        condition: service_healthy
 
   control:
     <<: *restart

@@ -9,7 +9,8 @@ server:
       enabled: true
       directory: /app/logs
       buffered: false
-      pattern: '%t %a "%r" %s %b %Dms'
+      # %U = path without query string: the WebSocket URL carries the login JWT (?x-auth-token=)
+      pattern: '%t %a "%m %U %H" %s %b %Dms'
 
 spring:
   main:

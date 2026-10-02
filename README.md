@@ -58,6 +58,9 @@ Bisherige Patches:
 - **control 0014:** Kamera-/Objektivspalte (Wide, IR, MS-Band ...), Medienliste verschlankt
 - **control 0015:** Farming Guide auf der Mapping-Seite: Profil Multispektral, Index-Legende und Statistik
 - **control 0016:** Farming Guide: Zonenkarten, Ausbringmengen, Export (Shapefile, ISO-XML, KML, GeoJSON)
+- **control 0017:** Oberfläche auf Deutsch (zentrale Übersetzung `src/locales/de.ts`)
+
+Prüfen, ob die Patches vollständig sind und sauber auf die gepinnten Commits passen: `edge/verify-patches.sh`
 
 ## Schnellstart
 
