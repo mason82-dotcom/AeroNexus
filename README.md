@@ -19,7 +19,7 @@ DJI Pilot 2 auf der Fernsteuerung verbindet sich direkt mit dem eigenen Server, 
 | AeroNexus Mapping Tool | `mapping-tool/` | Basis | Leaflet/OSM-Karte, Annotationen, Flugzonen. Offline-Karten geplant |
 | AeroNexus RTK | `rtk/` | geplant | Eigene RTK-Basis / NTRIP-Caster |
 | AeroNexus Photovoltaik Tool | `photovoltaik-tool/` | geplant | Thermografie-Auswertung von PV-Anlagen (M3T / M4T) |
-| AeroNexus Farming Guide | `farming-guide/` | geplant | Multispektral-Auswertung (M3M): NDVI und Applikationskarten |
+| AeroNexus Farming Guide | `farming-guide/` | Stufe A | Multispektral-Auswertung (M3M): NDVI und Applikationskarten |
 | AeroNexus Photogrammetrie Addon | `photogrammetrie-addon/` | geplant | Orthofotos, 3D-Modelle (OpenDroneMap) |
 | AeroNexus Compute-Agent | `compute-agent/` | verfügbar | Rechenknoten (x64, Windows/WSL2 oder Linux): NodeODM, COG, Kacheln für das Mapping Tool |
 | AeroNexus Edge | `edge/` | verfügbar | Installation auf Raspberry Pi 5 / lokalem Server (Docker Compose) |
@@ -56,6 +56,7 @@ Bisherige Patches:
 - **control 0012:** Vorschaubilder in der Medienliste (Foto, Waermebild, Multispektral)
 - **control 0013:** Fotoparameter in der Medienliste (Aufnahmezeit, Belichtung, GNSS/Hoehe, Gimbal, LRF)
 - **control 0014:** Kamera-/Objektivspalte (Wide, IR, MS-Band ...), Medienliste verschlankt
+- **control 0015:** Farming Guide auf der Mapping-Seite: Profil Multispektral, Index-Legende und Statistik
 
 ## Schnellstart
 

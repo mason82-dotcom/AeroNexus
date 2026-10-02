@@ -1,0 +1,137 @@
+From b19fc06c77a5129e6e4f7bfbb69d6dec1865fc76 Mon Sep 17 00:00:00 2001
+From: aeronexus <aeronexus@local>
+Date: Fri, 2 Oct 2026 20:41:57 +0200
+Subject: [PATCH] onprem: Farming Guide in the Mapping page
+
+Profile 'Multispectral (M3M)' with automatic selection of the Mavic 3M band
+images; index layers show a colour legend (palette over the value range), a
+'relative' tag and statistics (mean, P10, median, P90, valid share).
+---
+ src/api/mapping.ts                      |  6 ++-
+ src/pages/page-web/projects/mapping.vue | 54 ++++++++++++++++++++++++-
+ 2 files changed, 57 insertions(+), 3 deletions(-)
+
+diff --git a/src/api/mapping.ts b/src/api/mapping.ts
+index bc7cd66..ff59870 100644
+--- a/src/api/mapping.ts
++++ b/src/api/mapping.ts
+@@ -3,7 +3,7 @@ import axios from 'axios'
+ import { CURRENT_CONFIG } from '/@/api/http/config'
+ import { ELocalStorageKey } from '/@/types/enums'
+ 
+-export type MappingProfile = 'fast' | 'standard' | 'high'
++export type MappingProfile = 'fast' | 'standard' | 'high' | 'multispectral'
+ 
+ export interface MappingMedia {
+   file_id: string
+@@ -45,6 +45,10 @@ export interface MappingLayer {
+   attribution: string | null
+   created_at: string
+   tile_url: string
++  kind: string // orthophoto | ndvi | ndre | gndvi ...
++  relative: boolean
++  legend: { range: [number, number], palette: [number, string][], unit?: string, description?: string } | null
++  stats: { mean: number, std: number, min: number, max: number, p10: number, p50: number, p90: number, valid_ratio: number } | null
+ }
+ 
+ export function mappingBase (): string {
+diff --git a/src/pages/page-web/projects/mapping.vue b/src/pages/page-web/projects/mapping.vue
+index 2f16594..818761a 100644
+--- a/src/pages/page-web/projects/mapping.vue
++++ b/src/pages/page-web/projects/mapping.vue
+@@ -19,6 +19,19 @@
+               <a title="Delete layer" class="danger"><DeleteOutlined /></a>
+             </a-popconfirm>
+           </div>
++          <template v-if="layer.legend">
++            <div class="legend-bar" :style="{ background: legendGradient(layer) }"></div>
++            <div class="legend-scale">
++              <span>{{ layer.legend.range[0] }}</span>
++              <a-tag v-if="layer.relative" color="orange" class="rel" title="No reflectance panel: compare values within this flight only">relative</a-tag>
++              <span>{{ layer.legend.range[1] }}</span>
++            </div>
++            <div v-if="layer.stats" class="meta" :title="layer.legend.description">
++              mean {{ layer.stats.mean.toFixed(2) }} &#183; P10 {{ layer.stats.p10.toFixed(2) }} &#183;
++              median {{ layer.stats.p50.toFixed(2) }} &#183; P90 {{ layer.stats.p90.toFixed(2) }} &#183;
++              {{ Math.round(layer.stats.valid_ratio * 100) }} % valid
++            </div>
++          </template>
+           <div class="row">
+             <span class="label">Opacity</span>
+             <a-slider class="slider" :min="0" :max="1" :step="0.05"
+@@ -73,11 +86,17 @@
+             <a-radio-button value="fast">Fast</a-radio-button>
+             <a-radio-button value="standard">Standard</a-radio-button>
+             <a-radio-button value="high">High</a-radio-button>
++            <a-radio-button value="multispectral">Multispectral (M3M)</a-radio-button>
+           </a-radio-group>
++          <div v-if="form.profile === 'multispectral'" class="hint">
++            Farming Guide: uses the Mavic 3M band images (_MS_G/R/RE/NIR) and delivers NDVI, NDRE and GNDVI
++            as relative values plus a NIR-red-green false colour map.
++          </div>
+         </a-form-item>
+         <a-form-item :label="`Images (${form.keys.length} selected of ${media.length})`">
+           <div class="media-tools">
+-            <a @click="selectAll">All</a> <a @click="selectRgb">RGB only</a> <a @click="form.keys = []">None</a>
++            <a @click="selectAll">All</a> <a @click="selectRgb">RGB only</a> <a @click="selectMs">Multispectral bands</a>
++            <a @click="form.keys = []">None</a>
+           </div>
+           <a-table size="small" :pagination="false" :scroll="{ y: 320 }" row-key="object_key"
+                    :columns="mediaColumns" :data-source="media" :loading="mediaLoading"
+@@ -89,7 +108,7 @@
+ </template>
+ 
+ <script lang="ts" setup>
+-import { computed, onMounted, onUnmounted, reactive, ref } from 'vue'
++import { computed, onMounted, onUnmounted, reactive, ref, watch } from 'vue'
+ import { message } from 'ant-design-vue'
+ import { AimOutlined, DeleteOutlined, ReloadOutlined, StopOutlined } from '@ant-design/icons-vue'
+ import Title from '/@/components/workspace/Title.vue'
+@@ -189,6 +208,20 @@ function selectRgb () {
+   form.keys = media.value.filter(m => /_(D|V|W)\.(jpe?g)$/i.test(m.file_name)).map(m => m.object_key)
+ }
+ 
++function selectMs () {
++  form.keys = media.value.filter(m => /_MS_(G|R|RE|NIR)\.tiff?$/i.test(m.file_name)).map(m => m.object_key)
++}
++
++watch(() => form.profile, (profile) => {
++  if (profile === 'multispectral') selectMs()
++})
++
++function legendGradient (layer: MappingLayer): string {
++  const [lo, hi] = layer.legend!.range
++  const stops = layer.legend!.palette.map(([v, c]) => `${c} ${Math.round((v - lo) / (hi - lo) * 100)}%`)
++  return `linear-gradient(to right, ${stops.join(', ')})`
++}
++
+ async function submit () {
+   creating.value = true
+   try {
+@@ -260,6 +293,23 @@ onUnmounted(() => window.clearInterval(timer))
+   color: #ff7875;
+   word-break: break-word;
+ }
++.legend-bar {
++  height: 8px;
++  border-radius: 2px;
++  margin-top: 4px;
++}
++.legend-scale {
++  display: flex;
++  justify-content: space-between;
++  align-items: center;
++  font-size: 11px;
++  color: #aaa;
++  .rel {
++    font-size: 10px;
++    line-height: 16px;
++    margin: 0;
++  }
++}
+ .danger {
+   color: #ff7875;
+ }
+-- 
+2.47.3
+
