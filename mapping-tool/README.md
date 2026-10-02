@@ -14,4 +14,7 @@ Dokumente:
 
 Test ohne Rechenknoten: `python3 mapping-tool/service/tools/sim_agent.py`
 
-Geplant: compute-agent fuer x64 (NodeODM), Messwerkzeuge, Offline-Basiskarte, WPML-Flugplanung.
+Offline-Basiskarte: `basemaps/fetch-basemap.sh` (Protomaps-Vektorkarte als PMTiles, Region per GeoJSON;
+Details in edge/README.md, Abschnitt Karte).
+
+Geplant: Messwerkzeuge, WPML-Flugplanung.

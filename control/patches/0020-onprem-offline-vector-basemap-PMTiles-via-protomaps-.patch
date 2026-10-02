@@ -1,0 +1,279 @@
+From b411fe62f2bf6fc9f2d5187f027fb677fce3176f Mon Sep 17 00:00:00 2001
+From: RomaN <mason82.rm@googlemail.com>
+Date: Fri, 2 Oct 2026 22:38:12 +0200
+Subject: [PATCH] onprem: offline vector basemap (PMTiles via
+ protomaps-leaflet) as default map layer
+
+---
+ package.json                     |   1 +
+ src/vendors/amap-leaflet-shim.ts |  19 +++++-
+ yarn.lock                        | 108 ++++++++++++++++++++++++++++++-
+ 3 files changed, 125 insertions(+), 3 deletions(-)
+
+diff --git a/package.json b/package.json
+index a029a14..07492e5 100644
+--- a/package.json
++++ b/package.json
+@@ -20,6 +20,7 @@
+     "leaflet": "1.9.4",
+     "mitt": "^3.0.0",
+     "mqtt": "^4.3.7",
++    "protomaps-leaflet": "5.1.0",
+     "query-string": "^7.0.1",
+     "reconnecting-websocket": "^4.4.0",
+     "vconsole": "^3.8.1",
+diff --git a/src/vendors/amap-leaflet-shim.ts b/src/vendors/amap-leaflet-shim.ts
+index 8cdffcd..73f1268 100644
+--- a/src/vendors/amap-leaflet-shim.ts
++++ b/src/vendors/amap-leaflet-shim.ts
+@@ -8,6 +8,7 @@
+  */
+ import L from 'leaflet'
+ import 'leaflet/dist/leaflet.css'
++import { leafletLayer } from 'protomaps-leaflet'
+ 
+ type Coord = LngLat | [number, number] | { lng: number, lat: number }
+ 
+@@ -253,6 +254,9 @@ export class Circle extends Overlay {
+ const TILE_URL = (import.meta.env.VITE_MAP_TILE_URL as string) || 'https://tile.openstreetmap.org/{z}/{x}/{y}.png'
+ const TILE_ATTR = (import.meta.env.VITE_MAP_TILE_ATTRIBUTION as string) || '&copy; OpenStreetMap contributors'
+ const SAT_URL = 'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}'
++// onprem: offline vector basemap (PMTiles from mapping-tool/basemaps/fetch-basemap.sh, served by the web nginx)
++const PMTILES_URL = (import.meta.env.VITE_MAP_PMTILES_URL as string) || ''
++const PMTILES_ATTR = '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>, <a href="https://protomaps.com">Protomaps</a>'
+ 
+ export class Map {
+   leaflet: L.Map
+@@ -270,8 +274,19 @@ export class Map {
+     el.style.zIndex = '0'
+     const street = L.tileLayer(TILE_URL, { maxZoom: 20, maxNativeZoom: 19, attribution: TILE_ATTR })
+     const sat = L.tileLayer(SAT_URL, { maxZoom: 20, maxNativeZoom: 19, attribution: 'Tiles &copy; Esri' })
+-    street.addTo(this.leaflet)
+-    L.control.layers({ Karte: street, Satellit: sat }, {}, { position: 'topright' }).addTo(this.leaflet)
++    const bases: Record<string, L.Layer> = {}
++    if (PMTILES_URL) {
++      // works without internet; outside the extracted region the map stays empty -> switch to online
++      const offline = leafletLayer({ url: PMTILES_URL, flavor: 'light', lang: 'de', maxDataZoom: 15,
++        attribution: PMTILES_ATTR }) as unknown as L.Layer
++      bases['Offline-Karte'] = offline
++      offline.addTo(this.leaflet)
++    } else {
++      street.addTo(this.leaflet)
++    }
++    bases[PMTILES_URL ? 'Karte (online)' : 'Karte'] = street
++    bases[PMTILES_URL ? 'Satellit (online)' : 'Satellit'] = sat
++    L.control.layers(bases, {}, { position: 'topright' }).addTo(this.leaflet)
+     L.control.scale({ imperial: false }).addTo(this.leaflet)
+   }
+ 
+diff --git a/yarn.lock b/yarn.lock
+index 2bb5b6c..8f2b076 100644
+--- a/yarn.lock
++++ b/yarn.lock
+@@ -333,6 +333,20 @@
+     "@intlify/runtime" "9.1.9"
+     "@intlify/shared" "9.1.9"
+ 
++"@mapbox/point-geometry@^1.1.0", "@mapbox/point-geometry@~1.1.0":
++  version "1.1.0"
++  resolved "https://registry.yarnpkg.com/@mapbox/point-geometry/-/point-geometry-1.1.0.tgz#3328fb54b3a1273bc619bf0a6baad8de37181749"
++  integrity sha512-YGcBz1cg4ATXDCM/71L9xveh4dynfGmcLDqufR+nQQy3fKwsAZsWd/x4621/6uJaeB9mwOHE6hPeDgXz9uViUQ==
++
++"@mapbox/vector-tile@^2.0.2":
++  version "2.0.5"
++  resolved "https://registry.yarnpkg.com/@mapbox/vector-tile/-/vector-tile-2.0.5.tgz#d00d894c9ad9350068a4e697e114c47d67072b54"
++  integrity sha512-pXj8m7KTsqZt+1jsE0xIpGvqTSbblfkuEJL/NJmNePMtEwxO8V3XMDo9WMSfDeqHvCtBI9Lmt4mGcGR10zecmw==
++  dependencies:
++    "@mapbox/point-geometry" "~1.1.0"
++    "@types/geojson" "^7946.0.16"
++    pbf "^4.0.2"
++
+ "@nodelib/fs.scandir@2.1.5":
+   version "2.1.5"
+   resolved "https://registry.yarnpkg.com/@nodelib/fs.scandir/-/fs.scandir-2.1.5.tgz"
+@@ -354,6 +368,11 @@
+     "@nodelib/fs.scandir" "2.1.5"
+     fastq "^1.6.0"
+ 
++"@protomaps/basemaps@^5.0.0":
++  version "5.7.2"
++  resolved "https://registry.yarnpkg.com/@protomaps/basemaps/-/basemaps-5.7.2.tgz#06c0ba62e4317c84d31e54e7e5f4ee20947d22b0"
++  integrity sha512-K1Yk6bWdULulYg+R2QRVXx4NzJZan5YQhpejEG0c1/sXruJrfPIPZuakpf3jwAgVmjIRVQwAv+yRafDeN0aaUQ==
++
+ "@rollup/pluginutils@^4.0.0", "@rollup/pluginutils@^4.1.0", "@rollup/pluginutils@^4.1.2":
+   version "4.1.2"
+   resolved "https://registry.yarnpkg.com/@rollup/pluginutils/-/pluginutils-4.1.2.tgz"
+@@ -375,12 +394,17 @@
+   resolved "https://registry.yarnpkg.com/@trysound/sax/-/sax-0.2.0.tgz"
+   integrity sha1-zMqrdYr1Z2Hre/N69vA/Mm3XmK0=
+ 
++"@types/css-font-loading-module@^0.0.7":
++  version "0.0.7"
++  resolved "https://registry.yarnpkg.com/@types/css-font-loading-module/-/css-font-loading-module-0.0.7.tgz#2f98ede46acc0975de85c0b7b0ebe06041d24601"
++  integrity sha512-nl09VhutdjINdWyXxHWN/w9zlNCfr60JUqJbd24YXUuCwgeL0TpFSdElCwb6cxfB6ybE19Gjj4g0jsgkXxKv1Q==
++
+ "@types/estree@*":
+   version "0.0.50"
+   resolved "https://registry.yarnpkg.com/@types/estree/-/estree-0.0.50.tgz"
+   integrity sha1-Hgyqk2TT/M0pMcPtlv2+ql1MyoM=
+ 
+-"@types/geojson@*":
++"@types/geojson@*", "@types/geojson@^7946.0.16":
+   version "7946.0.16"
+   resolved "https://registry.yarnpkg.com/@types/geojson/-/geojson-7946.0.16.tgz#8ebe53d69efada7044454e3305c19017d97ced2a"
+   integrity sha512-6C8nqWur3j98U6+lXDfTUWIfgvZU+EumvpHKcYjujKH7woYyLj2sUmff0tRhrqM7BohUw7Pz3ZB1jj2gW9Fvmg==
+@@ -402,6 +426,13 @@
+   dependencies:
+     "@types/geojson" "*"
+ 
++"@types/leaflet@^1.9.8":
++  version "1.9.22"
++  resolved "https://registry.yarnpkg.com/@types/leaflet/-/leaflet-1.9.22.tgz#d46d501e5bcdf5a99374cf113ab33562cb887783"
++  integrity sha512-h3lhECYEKDasG7LFHu+GiHqAvsgLuQvlJvVZzJDGONo3sEL+wUOqSFLnwkZlK0qVxnxbuGFW8iBlJNYs5wgndA==
++  dependencies:
++    "@types/geojson" "*"
++
+ "@types/lodash@^4.14.165":
+   version "4.14.178"
+   resolved "https://registry.yarnpkg.com/@types/lodash/-/lodash-4.14.178.tgz"
+@@ -412,6 +443,11 @@
+   resolved "https://registry.yarnpkg.com/@types/node/-/node-16.11.19.tgz"
+   integrity sha512-BPAcfDPoHlRQNKktbsbnpACGdypPFBuX4xQlsWDE7B8XXcfII+SpOLay3/qZmCLb39kV5S1RTYwXdkx2lwLYng==
+ 
++"@types/rbush@^3.0.0":
++  version "3.0.4"
++  resolved "https://registry.yarnpkg.com/@types/rbush/-/rbush-3.0.4.tgz#265d84ec76dc48e464e95ae4f58e085f28f0a227"
++  integrity sha512-knSt9cCW8jj1ZSFcFeBZaX++OucmfPxxHiRwTahZfJlnQsek7O0bazTJHWD2RVj9LEoejUYF2de3/stf+QXcXw==
++
+ "@types/svgo@^2.6.0":
+   version "2.6.1"
+   resolved "https://registry.yarnpkg.com/@types/svgo/-/svgo-2.6.1.tgz"
+@@ -1113,6 +1149,11 @@ color-name@~1.1.4:
+   resolved "https://registry.yarnpkg.com/color-name/-/color-name-1.1.4.tgz"
+   integrity sha1-wqCah6y95pVD3m9j+jmVyCbFNqI=
+ 
++color2k@^2.0.3:
++  version "2.0.4"
++  resolved "https://registry.yarnpkg.com/color2k/-/color2k-2.0.4.tgz#c874da1e6f089fcc32ef5ab0427e7ba7fe069d64"
++  integrity sha512-OXAPGFRNeLFnUfqDtloYdxkwsJoIdXe28+bjbpJiPqyei2HPa3VHmMCWa0Qe62+U4Ftf9Hj7hRssOkxz7WiWbg==
++
+ commander@^7.2.0:
+   version "7.2.0"
+   resolved "https://registry.yarnpkg.com/commander/-/commander-7.2.0.tgz"
+@@ -1921,6 +1962,11 @@ fastq@^1.6.0:
+   dependencies:
+     reusify "^1.0.4"
+ 
++fflate@^0.8.0:
++  version "0.8.3"
++  resolved "https://registry.yarnpkg.com/fflate/-/fflate-0.8.3.tgz#bc27d8eb30343d4d512abb03480202ce65d825fc"
++  integrity sha512-tbZNuJrLwGUp3zshBtdy4W+ORxZuIh8a5ilyIEQDC5rY1f3U20JMry0Ll3WBzU58EZKsEuJFXhb5gwv8CsPvgA==
++
+ file-entry-cache@^6.0.1:
+   version "6.0.1"
+   resolved "https://registry.yarnpkg.com/file-entry-cache/-/file-entry-cache-6.0.1.tgz"
+@@ -3050,6 +3096,13 @@ path-type@^4.0.0:
+   resolved "https://registry.yarnpkg.com/path-type/-/path-type-4.0.0.tgz"
+   integrity sha1-hO0BwKe6OAr+CdkKjBgNzZ0DBDs=
+ 
++pbf@^4.0.1, pbf@^4.0.2:
++  version "4.0.2"
++  resolved "https://registry.yarnpkg.com/pbf/-/pbf-4.0.2.tgz#70f71a5c4df774438c1db482630146decb03e2d9"
++  integrity sha512-J0ajxARhZfpUEebxYs1vhMGMuLSXtBe1e+fFPDrf2uA2hgo+UshKfNUWOz92HJNz6/NFEXseQPddnHkTreWRqg==
++  dependencies:
++    resolve-protobuf-schema "^2.1.0"
++
+ picocolors@^1.0.0:
+   version "1.0.0"
+   resolved "https://registry.yarnpkg.com/picocolors/-/picocolors-1.0.0.tgz"
+@@ -3060,6 +3113,14 @@ picomatch@^2.0.4, picomatch@^2.2.1, picomatch@^2.2.2, picomatch@^2.2.3:
+   resolved "https://registry.yarnpkg.com/picomatch/-/picomatch-2.3.1.tgz"
+   integrity sha512-JU3teHTNjmE2VCGFzuY8EXzCDVwEqB2a8fsIvwaStHhAWJEeVd1o1QD80CU6+ZdEXXSLbSsuLwJjkCBWqRQUVA==
+ 
++pmtiles@^3.1.0:
++  version "3.2.1"
++  resolved "https://registry.yarnpkg.com/pmtiles/-/pmtiles-3.2.1.tgz#0ef79982ccf6052eeb9301ce7d161996c0b193de"
++  integrity sha512-3R4fBwwoli5mw7a6t1IGwOtfmcSAODq6Okz0zkXhS1zi9sz1ssjjIfslwPvcWw5TNhdjNBUg9fgfPLeqZlH6ng==
++  dependencies:
++    "@types/leaflet" "^1.9.8"
++    fflate "^0.8.0"
++
+ posix-character-classes@^0.1.0:
+   version "0.1.1"
+   resolved "https://registry.yarnpkg.com/posix-character-classes/-/posix-character-classes-0.1.1.tgz"
+@@ -3127,6 +3188,11 @@ posthtml@^0.9.2:
+     posthtml-parser "^0.2.0"
+     posthtml-render "^1.0.5"
+ 
++potpack@^1.0.2:
++  version "1.0.2"
++  resolved "https://registry.yarnpkg.com/potpack/-/potpack-1.0.2.tgz#23b99e64eb74f5741ffe7656b5b5c4ddce8dfc14"
++  integrity sha512-choctRBIV9EMT9WGAZHn3V7t0Z2pMQyl0EZE6pFc/6ml3ssw7Dlf/oAOvFwjm1HVsqfQN8GfeFyJ+d8tRzqueQ==
++
+ prelude-ls@^1.2.1:
+   version "1.2.1"
+   resolved "https://registry.yarnpkg.com/prelude-ls/-/prelude-ls-1.2.1.tgz"
+@@ -3142,6 +3208,27 @@ progress@^2.0.0:
+   resolved "https://registry.yarnpkg.com/progress/-/progress-2.0.3.tgz"
+   integrity sha512-7PiHtLll5LdnKIMw100I+8xJXR5gW2QwWYkT6iJva0bXitZKa/XMrSbdmg3r2Xnaidz9Qumd0VPaMrZlF9V9sA==
+ 
++protocol-buffers-schema@^3.3.1:
++  version "3.6.1"
++  resolved "https://registry.yarnpkg.com/protocol-buffers-schema/-/protocol-buffers-schema-3.6.1.tgz#fd9a58a5c4e96385b964808f3ddd58f9ef18c3c8"
++  integrity sha512-VG2K63Igkiv9p76tk1lilczEK1cT+kCjKtkdhw1dQZV3k3IXJbd3o6Ho8b9zJZaHSnT2hKe4I+ObmX9w6m5SmQ==
++
++protomaps-leaflet@5.1.0:
++  version "5.1.0"
++  resolved "https://registry.yarnpkg.com/protomaps-leaflet/-/protomaps-leaflet-5.1.0.tgz#4e5cfd270134b60653254b492a7f2c76aac959f9"
++  integrity sha512-N0YY1Gbw5nZ9n8VUOvwHKm/w3zhTTuaZEeMZl8doHemeM4ujGPp2otI6t4Sgqrz8iM4svx2rpG1Q17rHkOWSaA==
++  dependencies:
++    "@mapbox/point-geometry" "^1.1.0"
++    "@mapbox/vector-tile" "^2.0.2"
++    "@protomaps/basemaps" "^5.0.0"
++    "@types/css-font-loading-module" "^0.0.7"
++    "@types/rbush" "^3.0.0"
++    color2k "^2.0.3"
++    pbf "^4.0.1"
++    pmtiles "^3.1.0"
++    potpack "^1.0.2"
++    rbush "^3.0.1"
++
+ pump@^3.0.0:
+   version "3.0.0"
+   resolved "https://registry.yarnpkg.com/pump/-/pump-3.0.0.tgz"
+@@ -3178,6 +3265,18 @@ queue-microtask@^1.2.2:
+   resolved "https://registry.yarnpkg.com/queue-microtask/-/queue-microtask-1.2.3.tgz"
+   integrity sha1-SSkii7xyTfrEPg77BYyve2z7YkM=
+ 
++quickselect@^2.0.0:
++  version "2.0.0"
++  resolved "https://registry.yarnpkg.com/quickselect/-/quickselect-2.0.0.tgz#f19680a486a5eefb581303e023e98faaf25dd018"
++  integrity sha512-RKJ22hX8mHe3Y6wH/N3wCM6BWtjaxIyyUIkpHOvfFnxdI4yD4tBXEBKSbriGujF6jnSVkJrffuo6vxACiSSxIw==
++
++rbush@^3.0.1:
++  version "3.0.1"
++  resolved "https://registry.yarnpkg.com/rbush/-/rbush-3.0.1.tgz#5fafa8a79b3b9afdfe5008403a720cc1de882ecf"
++  integrity sha512-XRaVO0YecOpEuIvbhbpTrZgoiI6xBlz6hnlr6EHhd+0x9ase6EmeN+hdwwUaJvLcsFFQ8iWVF1GAK1yB0BWi0w==
++  dependencies:
++    quickselect "^2.0.0"
++
+ readable-stream@^2.0.2, readable-stream@~2.3.6:
+   version "2.3.7"
+   resolved "https://registry.yarnpkg.com/readable-stream/-/readable-stream-2.3.7.tgz"
+@@ -3260,6 +3359,13 @@ resolve-from@^4.0.0:
+   resolved "https://registry.yarnpkg.com/resolve-from/-/resolve-from-4.0.0.tgz"
+   integrity sha1-SrzYUq0y3Xuqv+m0DgCjbbXzkuY=
+ 
++resolve-protobuf-schema@^2.1.0:
++  version "2.1.0"
++  resolved "https://registry.yarnpkg.com/resolve-protobuf-schema/-/resolve-protobuf-schema-2.1.0.tgz#9ca9a9e69cf192bbdaf1006ec1973948aa4a3758"
++  integrity sha512-kI5ffTiZWmJaS/huM8wZfEMer1eRd7oJQhDuxeCLe3t7N7mX3z94CN0xPxBQxFYQTSNz9T0i+v6inKqSdK8xrQ==
++  dependencies:
++    protocol-buffers-schema "^3.3.1"
++
+ resolve-url@^0.2.1:
+   version "0.2.1"
+   resolved "https://registry.yarnpkg.com/resolve-url/-/resolve-url-0.2.1.tgz"
+-- 
+2.47.3
+

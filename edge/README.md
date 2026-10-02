@@ -97,8 +97,17 @@ Zeichnen von Annotationen und Flugzonen:
 - **Linie / Polygon:** Klicks setzen Punkte, Doppelklick beendet. `Esc` bricht ab.
 - **Kreis (Flugzone):** Maustaste am Mittelpunkt drücken, auf den Radius ziehen, loslassen.
 
-Der öffentliche OSM-Kachelserver ist für gelegentliche private Nutzung gedacht. Für Dauerbetrieb oder
-Einsätze ohne Internet einen eigenen Kachelserver eintragen.
+**Offline-Karte:** Standard-Ebene ist eine Vektorkarte von Baden-Württemberg (+10 km Rand), die komplett
+vom Server kommt und ohne Internet funktioniert (Straßen, Wege, Gebäude, Gewässer, Ortsnamen, Zoom bis 20).
+Die Ebenen „Karte (online)“ und „Satellit (online)“ bleiben im Ebenen-Schalter oben rechts.
+- Datei: `edge/data/basemaps/baden-wuerttemberg.pmtiles` (ca. 800 MB, OpenStreetMap über Protomaps)
+- Erstellen/aktualisieren (z. B. monatlich): `mapping-tool/basemaps/fetch-basemap.sh`
+- Andere Region: GeoJSON-Polygon nach `mapping-tool/basemaps/regions/<name>.geojson`,
+  `fetch-basemap.sh <name>` und `MAP_PMTILES_URL=/basemaps/<name>.pmtiles` in `edge/.env`
+- Außerhalb der Region bleibt die Offline-Karte leer: dort auf „Karte (online)“ umschalten.
+- Die Kartendatei ist nicht in der Datensicherung (jederzeit neu ladbar).
+
+Der öffentliche OSM-Kachelserver (Ebene „Karte (online)“) ist für gelegentliche private Nutzung gedacht.
 
 ## Livestream
 

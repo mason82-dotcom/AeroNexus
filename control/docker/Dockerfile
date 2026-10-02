@@ -16,6 +16,7 @@ ARG VITE_RTSP_PASSWORD
 ARG VITE_MAP_CENTER
 ARG VITE_MAP_ZOOM
 ARG VITE_MAP_TILE_URL
+ARG VITE_MAP_PMTILES_URL
 COPY package.json yarn.lock ./
 RUN yarn install --frozen-lockfile --ignore-engines --network-timeout 300000
 COPY . .

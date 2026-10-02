@@ -92,6 +92,10 @@ Editing routes (mapping-tool/service/app/wpml.py, verified with Pilot 2 on RC Pr
   facade over Leaflet 1.9.4. Callers still use `$aMap` / `$map` / `$mouseTool`. Only the API surface
   the demo uses is implemented; if upstream code calls a new AMap method, add it to the shim.
   Coordinates are WGS84; the demo's GCJ-02 transform is a no-op outside China.
+- Offline basemap: protomaps-leaflet 5.1.0 (web patch 0020) renders `MAP_PMTILES_URL` (default layer when set)
+  from edge/data/basemaps, served by the control nginx (`/basemaps/`, range requests; nginx.conf and Dockerfile
+  are copied into the build dir by setup.sh, re-run it after changing them). File made by
+  `mapping-tool/basemaps/fetch-basemap.sh` (go-pmtiles extract of the daily Protomaps build, maxzoom 15).
 - MinIO CE: no images/binaries published anymore -> built from pinned source in `evidence/docker/minio`
   (minio RELEASE.2025-10-15T17-29-55Z, mc RELEASE.2025-08-13T08-35-41Z). No further security fixes;
   LAN only. Phase 2: evaluate STS-capable replacement.

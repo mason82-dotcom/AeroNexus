@@ -282,7 +282,11 @@ services:
         VITE_MAP_CENTER: ${MAP_CENTER}
         VITE_MAP_ZOOM: ${MAP_ZOOM}
         VITE_MAP_TILE_URL: ${MAP_TILE_URL}
+        # offline vector basemap served by this container (empty = online tiles only)
+        VITE_MAP_PMTILES_URL: ${MAP_PMTILES_URL:-}
     image: aeronexus/control:local
+    volumes:
+      - ./data/basemaps:/usr/share/nginx/basemaps:ro   # mapping-tool/basemaps/fetch-basemap.sh
     ports:
       - "8085:80"       # Web UI + Pilot 2 login page (/pilot-login); host 8080 taken by nextcloud-aio
     depends_on:

@@ -16,7 +16,7 @@ DJI Pilot 2 auf der Fernsteuerung verbindet sich direkt mit dem eigenen Server, 
 | AeroNexus Telemetry | `telemetry/` | verfügbar | MQTT-Broker (EMQX), Livestream-Server (MediaMTX) |
 | AeroNexus Evidence | `evidence/` | Basis | Medienablage (S3/MinIO). Beweissicherung geplant |
 | AeroNexus Mission | `mission/` | Basis | Wegpunkt-Bibliothek. Eigene Missionsplanung geplant |
-| AeroNexus Mapping Tool | `mapping-tool/` | Basis | Leaflet/OSM-Karte, Annotationen, Flugzonen. Offline-Karten geplant |
+| AeroNexus Mapping Tool | `mapping-tool/` | Basis | Leaflet-Karte (offline: Baden-Württemberg als Vektorkarte), Annotationen, Flugzonen, Kartierungsaufträge |
 | AeroNexus RTK | `rtk/` | geplant | Eigene RTK-Basis / NTRIP-Caster |
 | AeroNexus Photovoltaik Tool | `photovoltaik-tool/` | geplant | Thermografie-Auswertung von PV-Anlagen (M3T / M4T) |
 | AeroNexus Farming Guide | `farming-guide/` | verfügbar | Multispektral-Auswertung (M3M): NDVI und Applikationskarten |
@@ -62,6 +62,7 @@ Bisherige Patches:
 - **control 0017:** Oberfläche auf Deutsch (zentrale Übersetzung `src/locales/de.ts`)
 - **control 0018:** Livestream-Player schicken den Web-Login an MediaMTX (Abspielen nur angemeldet)
 - **control 0019:** Agora-SDK wird erst beim Öffnen des Agora-Players geladen (keine Konsolenfehler, Hauptpaket 1,2 MB kleiner)
+- **control 0020:** Offline-Karte (Vektorkarte als PMTiles, protomaps-leaflet) als Standard-Ebene
 
 Prüfen, ob die Patches vollständig sind und sauber auf die gepinnten Commits passen: `edge/verify-patches.sh`
 
