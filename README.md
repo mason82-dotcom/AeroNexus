@@ -45,6 +45,7 @@ Bisherige Patches:
 - **control 0004:** Leaflet-Karte bleibt unter schwebenden Fenstern (Livestream-Fenster war verdeckt)
 - **control 0005:** Zeichenwerkzeug legt Annotationen nur noch einmal an (vorher bei jedem Werkzeugwechsel mehrfach)
 - **control 0006:** Annotationen landen auch beim Zeichnen ausserhalb der Annotations-Seite in der richtigen Ebene
+- **control 0007:** Seite Mapping: Auftraege, Bildauswahl aus den Medien, Ergebnis-Layer in der Karte
 
 ## Schnellstart
 

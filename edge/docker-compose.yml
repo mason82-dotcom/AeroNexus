@@ -196,6 +196,7 @@ services:
         VITE_DJI_APP_LICENSE: ${DJI_APP_LICENSE}
         VITE_BASE_URL: http://${SERVER_HOST}:6789/
         VITE_WS_URL: ws://${SERVER_HOST}:6789/api/v1/ws
+        VITE_MAPPING_URL: http://${SERVER_HOST}:6790/
         VITE_RTMP_URL: rtmp://${SERVER_HOST}:1935/live/
         VITE_WHEP_BASE: http://${SERVER_HOST}:8889/
         VITE_HLS_BASE: http://${SERVER_HOST}:8888/

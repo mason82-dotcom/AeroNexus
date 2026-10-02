@@ -1,0 +1,462 @@
+From 38e0a8e681d86be42c2afc6042097187c73834c9 Mon Sep 17 00:00:00 2001
+From: aeronexus <aeronexus@local>
+Date: Fri, 2 Oct 2026 13:36:35 +0200
+Subject: [PATCH] onprem: Mapping page (jobs, image selection, result layers on
+ the map)
+
+New page 'Mapping' for the AeroNexus mapping service (mapping-tool/service,
+VITE_MAPPING_URL): job list with status/progress, new-job dialog with image
+selection from the media uploaded by Pilot 2 and processing profile, result
+layers as Leaflet tile layers with visibility, opacity and zoom-to.
+---
+ src/api/http/config.ts                  |   2 +
+ src/api/mapping.ts                      |  84 ++++++++++
+ src/components/common/sidebar.vue       |   1 +
+ src/hooks/use-mapping-layers.ts         |  69 ++++++++
+ src/pages/page-web/projects/mapping.vue | 212 ++++++++++++++++++++++++
+ src/router/index.ts                     |   5 +
+ src/types/enums.ts                      |   1 +
+ 7 files changed, 374 insertions(+)
+ create mode 100644 src/api/mapping.ts
+ create mode 100644 src/hooks/use-mapping-layers.ts
+ create mode 100644 src/pages/page-web/projects/mapping.vue
+
+diff --git a/src/api/http/config.ts b/src/api/http/config.ts
+index a440fb9..e69ca48 100644
+--- a/src/api/http/config.ts
++++ b/src/api/http/config.ts
+@@ -11,6 +11,8 @@ export const CURRENT_CONFIG = {
+   // http - must end with "/" and be reachable from the remote controller (LAN IP / DNS, never a docker hostname)
+   baseURL: env.VITE_BASE_URL || '',
+   websocketURL: env.VITE_WS_URL || '',
++  // AeroNexus mapping service (mapping-tool/service), e.g. http://192.168.1.10:6790/
++  mappingURL: env.VITE_MAPPING_URL || '',
+ 
+   // livestreaming (RTMP ingest on MediaMTX)
+   rtmpURL: env.VITE_RTMP_URL || '',
+diff --git a/src/api/mapping.ts b/src/api/mapping.ts
+new file mode 100644
+index 0000000..3720090
+--- /dev/null
++++ b/src/api/mapping.ts
+@@ -0,0 +1,84 @@
++// AeroNexus mapping service (mapping-tool/service). Uses the same login token as the DJI backend.
++import axios from 'axios'
++import { CURRENT_CONFIG } from '/@/api/http/config'
++import { ELocalStorageKey } from '/@/types/enums'
++
++export type MappingProfile = 'fast' | 'standard' | 'high'
++
++export interface MappingMedia {
++  file_id: string
++  file_name: string
++  object_key: string
++  drone: string
++  payload: string
++  is_original: boolean
++  create_time: string
++}
++
++export interface MappingJob {
++  id: string
++  name: string
++  status: 'QUEUED' | 'CLAIMED' | 'RUNNING' | 'DONE' | 'FAILED'
++  image_count: number
++  options: { profile: MappingProfile, odm: Record<string, unknown> }
++  created_by: string
++  agent_id: string | null
++  lease_until: string | null
++  attempts: number
++  progress: number
++  message: string | null
++  error: string | null
++  created_at: string
++  finished_at: string | null
++}
++
++export interface MappingLayer {
++  id: string
++  job_id: string | null
++  name: string
++  type: string
++  format: string
++  min_zoom: number
++  max_zoom: number
++  bounds_wgs84: [number, number, number, number] | null
++  opacity: number
++  attribution: string | null
++  created_at: string
++  tile_url: string
++}
++
++export function mappingBase (): string {
++  return CURRENT_CONFIG.mappingURL.replace(/\/+$/, '')
++}
++
++export function authToken (): string {
++  return localStorage.getItem(ELocalStorageKey.Token) || ''
++}
++
++const http = axios.create({ timeout: 15000 })
++http.interceptors.request.use(config => {
++  config.baseURL = mappingBase()
++  config.headers[ELocalStorageKey.Token] = authToken()
++  return config
++})
++
++export async function getMappingMedia (page = 1, pageSize = 200): Promise<{ total: number, list: MappingMedia[] }> {
++  return (await http.get('/api/mapping/media', { params: { page, page_size: pageSize } })).data
++}
++
++export async function getMappingJobs (): Promise<MappingJob[]> {
++  return (await http.get('/api/mapping/jobs')).data
++}
++
++export async function createMappingJob (body: { name: string, image_keys: string[], profile: MappingProfile }): Promise<MappingJob> {
++  return (await http.post('/api/mapping/jobs', body)).data
++}
++
++export async function getMappingLayers (): Promise<MappingLayer[]> {
++  return (await http.get('/api/mapping/layers')).data
++}
++
++// Leaflet loads tiles via <img>, so the token goes into the query string
++export function layerTileUrl (layer: MappingLayer): string {
++  return mappingBase() + layer.tile_url + '?token=' + encodeURIComponent(authToken())
++}
+diff --git a/src/components/common/sidebar.vue b/src/components/common/sidebar.vue
+index 0a58ee3..a4adae0 100644
+--- a/src/components/common/sidebar.vue
++++ b/src/components/common/sidebar.vue
+@@ -60,6 +60,7 @@ export default defineComponent({
+       { key: 4, label: 'Flight Route Library', path: '/' + ERouterName.WAYLINE, icon: 'NodeIndexOutlined' },
+       { key: 5, label: 'Task Plan Library', path: '/' + ERouterName.TASK, icon: 'CalendarOutlined' },
+       { key: 6, label: 'Flight Area', path: '/' + ERouterName.FLIGHT_AREA, icon: 'GroupOutlined' },
++      { key: 7, label: 'Mapping', path: '/' + ERouterName.MAPPING, icon: 'GlobalOutlined' },
+     ]
+ 
+     function selectedRoute (item: IOptions) {
+diff --git a/src/hooks/use-mapping-layers.ts b/src/hooks/use-mapping-layers.ts
+new file mode 100644
+index 0000000..103ac68
+--- /dev/null
++++ b/src/hooks/use-mapping-layers.ts
+@@ -0,0 +1,69 @@
++// Result layers of the mapping service as Leaflet tile layers on the shared map.
++// Kept at module level so layers stay on the map when the Mapping page is left.
++import L from 'leaflet'
++import { reactive } from 'vue'
++import { getRoot } from '/@/root'
++import { MappingLayer, layerTileUrl } from '/@/api/mapping'
++
++const active = new Map<string, L.TileLayer>()
++export const layerState = reactive<{ visible: Record<string, boolean>, opacity: Record<string, number> }>({
++  visible: {},
++  opacity: {},
++})
++
++function leafletMap (): L.Map | undefined {
++  return getRoot()?.$map?.leaflet
++}
++
++function bounds (layer: MappingLayer): L.LatLngBounds | undefined {
++  if (!layer.bounds_wgs84) return undefined
++  const [w, s, e, n] = layer.bounds_wgs84
++  return L.latLngBounds([s, w], [n, e])
++}
++
++export function useMappingLayers () {
++  function show (layer: MappingLayer) {
++    const map = leafletMap()
++    if (!map || active.has(layer.id)) return
++    const opacity = layerState.opacity[layer.id] ?? layer.opacity
++    const tiles = L.tileLayer(layerTileUrl(layer), {
++      opacity,
++      minNativeZoom: layer.min_zoom,
++      maxNativeZoom: layer.max_zoom,
++      maxZoom: 22,
++      bounds: bounds(layer),
++      attribution: layer.attribution || '',
++      zIndex: 300, // above the base map (Karte/Satellit), below markers
++    })
++    tiles.addTo(map)
++    active.set(layer.id, tiles)
++    layerState.visible[layer.id] = true
++    layerState.opacity[layer.id] = opacity
++  }
++
++  function hide (id: string) {
++    const tiles = active.get(id)
++    if (tiles) tiles.remove()
++    active.delete(id)
++    layerState.visible[id] = false
++  }
++
++  function toggle (layer: MappingLayer, visible: boolean) {
++    visible ? show(layer) : hide(layer.id)
++  }
++
++  function setOpacity (id: string, opacity: number) {
++    layerState.opacity[id] = opacity
++    active.get(id)?.setOpacity(opacity)
++  }
++
++  function zoomTo (layer: MappingLayer) {
++    const b = bounds(layer)
++    const map = leafletMap()
++    if (!b || !map) return
++    if (!active.has(layer.id)) show(layer)
++    map.fitBounds(b, { maxZoom: layer.max_zoom })
++  }
++
++  return { show, hide, toggle, setOpacity, zoomTo }
++}
+diff --git a/src/pages/page-web/projects/mapping.vue b/src/pages/page-web/projects/mapping.vue
+new file mode 100644
+index 0000000..bc60e63
+--- /dev/null
++++ b/src/pages/page-web/projects/mapping.vue
+@@ -0,0 +1,212 @@
++<template>
++  <div class="mapping-wrapper height-100">
++    <Title title="Mapping" />
++    <div class="mapping-content uranus-scrollbar">
++      <!-- result layers -->
++      <div class="section">
++        <div class="section-head">
++          <span>Result layers</span>
++          <a @click="refresh"><ReloadOutlined /></a>
++        </div>
++        <div v-if="!layers.length" class="hint">No results yet.</div>
++        <div v-for="layer in layers" :key="layer.id" class="layer-item">
++          <div class="row">
++            <a-switch size="small" :checked="!!layerState.visible[layer.id]" @change="(v) => toggle(layer, v)" />
++            <span class="name" :title="layer.name">{{ layer.name }}</span>
++            <a v-if="layer.bounds_wgs84" title="Zoom to result" @click="zoomTo(layer)"><AimOutlined /></a>
++          </div>
++          <div class="row">
++            <span class="label">Opacity</span>
++            <a-slider class="slider" :min="0" :max="1" :step="0.05"
++                      :value="layerState.opacity[layer.id] ?? layer.opacity"
++                      @change="(v) => setOpacity(layer.id, v)" />
++          </div>
++        </div>
++      </div>
++
++      <!-- jobs -->
++      <div class="section">
++        <div class="section-head">
++          <span>Jobs</span>
++          <a-button size="small" type="primary" @click="openCreate">New job</a-button>
++        </div>
++        <div v-if="!jobs.length" class="hint">No jobs. Processing runs on the x64 compute node.</div>
++        <div v-for="job in jobs" :key="job.id" class="job-item">
++          <div class="row">
++            <span class="name" :title="job.name">{{ job.name }}</span>
++            <a-tag :color="statusColor[job.status]">{{ job.status }}</a-tag>
++          </div>
++          <a-progress v-if="job.status === 'RUNNING' || job.status === 'CLAIMED'" :percent="Math.round(job.progress)" size="small" />
++          <div class="meta">
++            {{ job.image_count }} images, {{ job.options.profile }}<span v-if="job.agent_id">, {{ job.agent_id }}</span>
++            <span v-if="job.attempts">, {{ job.attempts }} expired lease(s)</span>
++          </div>
++          <div v-if="job.message && job.status !== 'DONE'" class="meta">{{ job.message }}</div>
++          <div v-if="job.error" class="error">{{ job.error }}</div>
++        </div>
++      </div>
++    </div>
++
++    <a-modal v-model:visible="createVisible" title="New mapping job" :confirm-loading="creating"
++             ok-text="Create" :ok-button-props="{ disabled: !canCreate }" width="640px" @ok="submit">
++      <a-form layout="vertical">
++        <a-form-item label="Name">
++          <a-input v-model:value="form.name" :maxlength="200" placeholder="e.g. Halle Nord 2026-10-02" />
++        </a-form-item>
++        <a-form-item label="Profile">
++          <a-radio-group v-model:value="form.profile">
++            <a-radio-button value="fast">Fast</a-radio-button>
++            <a-radio-button value="standard">Standard</a-radio-button>
++            <a-radio-button value="high">High</a-radio-button>
++          </a-radio-group>
++        </a-form-item>
++        <a-form-item :label="`Images (${form.keys.length} selected of ${media.length})`">
++          <div class="media-tools">
++            <a @click="selectAll">All</a> <a @click="selectRgb">RGB only</a> <a @click="form.keys = []">None</a>
++          </div>
++          <a-table size="small" :pagination="false" :scroll="{ y: 320 }" row-key="object_key"
++                   :columns="mediaColumns" :data-source="media" :loading="mediaLoading"
++                   :row-selection="{ selectedRowKeys: form.keys, onChange: (keys) => form.keys = keys }" />
++        </a-form-item>
++      </a-form>
++    </a-modal>
++  </div>
++</template>
++
++<script lang="ts" setup>
++import { computed, onMounted, onUnmounted, reactive, ref } from 'vue'
++import { message } from 'ant-design-vue'
++import { AimOutlined, ReloadOutlined } from '@ant-design/icons-vue'
++import Title from '/@/components/workspace/Title.vue'
++import {
++  MappingJob, MappingLayer, MappingMedia, MappingProfile,
++  createMappingJob, getMappingJobs, getMappingLayers, getMappingMedia,
++} from '/@/api/mapping'
++import { layerState, useMappingLayers } from '/@/hooks/use-mapping-layers'
++
++const { toggle, setOpacity, zoomTo } = useMappingLayers()
++
++const jobs = ref<MappingJob[]>([])
++const layers = ref<MappingLayer[]>([])
++const media = ref<MappingMedia[]>([])
++const mediaLoading = ref(false)
++const createVisible = ref(false)
++const creating = ref(false)
++const form = reactive<{ name: string, profile: MappingProfile, keys: string[] }>({ name: '', profile: 'standard', keys: [] })
++
++const statusColor: Record<string, string> = {
++  QUEUED: 'default', CLAIMED: 'blue', RUNNING: 'processing', DONE: 'success', FAILED: 'error',
++}
++const mediaColumns = [
++  { title: 'File', dataIndex: 'file_name', ellipsis: true },
++  { title: 'Camera', dataIndex: 'payload', width: 150, ellipsis: true },
++  { title: 'Time (UTC)', dataIndex: 'create_time', width: 170, customRender: ({ text }: { text: string }) => text.replace('T', ' ').replace('Z', '') },
++]
++const canCreate = computed(() => form.name.trim().length > 0 && form.keys.length > 0)
++
++async function refresh () {
++  try {
++    const [j, l] = await Promise.all([getMappingJobs(), getMappingLayers()])
++    jobs.value = j
++    layers.value = l
++  } catch (e) {
++    message.error('Mapping service not reachable')
++  }
++}
++
++async function openCreate () {
++  createVisible.value = true
++  form.name = ''
++  form.keys = []
++  mediaLoading.value = true
++  try {
++    media.value = (await getMappingMedia()).list
++  } finally {
++    mediaLoading.value = false
++  }
++}
++
++function selectAll () {
++  form.keys = media.value.map(m => m.object_key)
++}
++
++// photogrammetry needs the visible/RGB images, not thermal (_T), multispectral (_MS_) or zoom
++function selectRgb () {
++  form.keys = media.value.filter(m => /_(D|V|W)\.(jpe?g)$/i.test(m.file_name)).map(m => m.object_key)
++}
++
++async function submit () {
++  creating.value = true
++  try {
++    await createMappingJob({ name: form.name.trim(), image_keys: form.keys, profile: form.profile })
++    message.success('Job queued')
++    createVisible.value = false
++    await refresh()
++  } catch (e: any) {
++    message.error('Creating the job failed: ' + (e?.response?.data?.detail ? JSON.stringify(e.response.data.detail) : e))
++  } finally {
++    creating.value = false
++  }
++}
++
++let timer: number | undefined
++onMounted(() => {
++  refresh()
++  timer = window.setInterval(refresh, 10000)
++})
++onUnmounted(() => window.clearInterval(timer))
++</script>
++
++<style lang="scss" scoped>
++.mapping-wrapper {
++  display: flex;
++  flex-direction: column;
++}
++.mapping-content {
++  flex: 1;
++  overflow-y: auto;
++  padding: 0 10px 10px;
++}
++.section {
++  margin-top: 10px;
++}
++.section-head {
++  display: flex;
++  justify-content: space-between;
++  align-items: center;
++  font-weight: 600;
++  margin-bottom: 6px;
++}
++.layer-item, .job-item {
++  background: #3c3c3c;
++  border-radius: 4px;
++  padding: 6px 8px;
++  margin-bottom: 6px;
++}
++.row {
++  display: flex;
++  align-items: center;
++  gap: 8px;
++}
++.name {
++  flex: 1;
++  overflow: hidden;
++  text-overflow: ellipsis;
++  white-space: nowrap;
++}
++.label, .meta, .hint {
++  font-size: 12px;
++  color: #aaa;
++}
++.slider {
++  flex: 1;
++}
++.error {
++  font-size: 12px;
++  color: #ff7875;
++  word-break: break-word;
++}
++.media-tools a {
++  margin-right: 12px;
++}
++</style>
+diff --git a/src/router/index.ts b/src/router/index.ts
+index b4e7b28..ab40c50 100644
+--- a/src/router/index.ts
++++ b/src/router/index.ts
+@@ -109,6 +109,11 @@ const routes: Array<RouteRecordRaw> = [
+         name: ERouterName.FLIGHT_AREA,
+         component: () => import('/@/pages/page-web/projects/flight-area.vue')
+       },
++      {
++        path: '/' + ERouterName.MAPPING,
++        name: ERouterName.MAPPING,
++        component: () => import('/@/pages/page-web/projects/mapping.vue')
++      },
+     ]
+   },
+   // pilot
+diff --git a/src/types/enums.ts b/src/types/enums.ts
+index d4efd07..3f4fb9c 100644
+--- a/src/types/enums.ts
++++ b/src/types/enums.ts
+@@ -16,6 +16,7 @@ export enum ERouterName {
+     SELECT_PLAN = 'select-plan',
+     FIRMWARES = 'firmwares',
+     FLIGHT_AREA = 'flight-area',
++    MAPPING = 'mapping',
+ 
+     PILOT = 'pilot-login',
+     PILOT_HOME = 'pilot-home',
+-- 
+2.47.3
+
