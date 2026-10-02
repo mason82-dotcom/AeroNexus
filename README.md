@@ -51,6 +51,7 @@ Bisherige Patches:
 - **control 0008:** Livestream-Hinweis: beim RC zeigt der Stream das in Pilot 2 gewaehlte Objektiv
 - **control 0009:** Flugrouten auf der Karte (Flaeche + berechnete Bahn), Flaechenrouten als Kopie bearbeiten
 - **control 0010:** Mapping-Auftraege und Ergebnis-Layer in der Oberflaeche loeschen
+- **control 0011:** Mapping-Auftraege abbrechen (auch waehrend der Rechenknoten rechnet)
 
 ## Schnellstart
 

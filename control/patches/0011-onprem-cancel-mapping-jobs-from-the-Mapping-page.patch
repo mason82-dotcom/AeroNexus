@@ -1,0 +1,98 @@
+From 9165260ae84b4e3c7e5615db637c978e026852b0 Mon Sep 17 00:00:00 2001
+From: aeronexus <aeronexus@local>
+Date: Fri, 2 Oct 2026 17:51:02 +0200
+Subject: [PATCH] onprem: cancel mapping jobs from the Mapping page
+
+Stop button with confirmation for QUEUED/CLAIMED/RUNNING jobs; running jobs
+stop at the compute node's next heartbeat. New status CANCELED (deletable).
+---
+ src/api/mapping.ts                      |  6 +++++-
+ src/pages/page-web/projects/mapping.vue | 24 +++++++++++++++++++++---
+ 2 files changed, 26 insertions(+), 4 deletions(-)
+
+diff --git a/src/api/mapping.ts b/src/api/mapping.ts
+index 9ecc9a4..d23214d 100644
+--- a/src/api/mapping.ts
++++ b/src/api/mapping.ts
+@@ -18,7 +18,7 @@ export interface MappingMedia {
+ export interface MappingJob {
+   id: string
+   name: string
+-  status: 'QUEUED' | 'CLAIMED' | 'RUNNING' | 'DONE' | 'FAILED'
++  status: 'QUEUED' | 'CLAIMED' | 'RUNNING' | 'DONE' | 'FAILED' | 'CANCELED'
+   image_count: number
+   options: { profile: MappingProfile, odm: Record<string, unknown> }
+   created_by: string
+@@ -74,6 +74,10 @@ export async function createMappingJob (body: { name: string, image_keys: string
+   return (await http.post('/api/mapping/jobs', body)).data
+ }
+ 
++export async function cancelMappingJob (jobId: string): Promise<{ status: string, agent_notified_at_next_heartbeat: boolean }> {
++  return (await http.post(`/api/mapping/jobs/${jobId}/cancel`)).data
++}
++
+ export async function deleteMappingJob (jobId: string): Promise<{ deleted_objects: number, deleted_layers: number }> {
+   return (await http.delete(`/api/mapping/jobs/${jobId}`)).data
+ }
+diff --git a/src/pages/page-web/projects/mapping.vue b/src/pages/page-web/projects/mapping.vue
+index ae3da17..2f16594 100644
+--- a/src/pages/page-web/projects/mapping.vue
++++ b/src/pages/page-web/projects/mapping.vue
+@@ -39,6 +39,12 @@
+           <div class="row">
+             <span class="name" :title="job.name">{{ job.name }}</span>
+             <a-tag :color="statusColor[job.status]">{{ job.status }}</a-tag>
++            <a-popconfirm v-if="['QUEUED', 'CLAIMED', 'RUNNING'].includes(job.status)"
++                          :title="job.status === 'QUEUED' ? 'Cancel this job?'
++                            : 'Cancel this job? The compute node stops at its next heartbeat (up to 2 min).'"
++                          ok-text="Cancel job" cancel-text="Keep" @confirm="stopJob(job)">
++              <a title="Cancel job" class="danger"><StopOutlined /></a>
++            </a-popconfirm>
+             <a-popconfirm v-if="job.status !== 'CLAIMED' && job.status !== 'RUNNING'"
+                           title="Delete this job with all results and its map layer?"
+                           ok-text="Delete" cancel-text="Cancel" @confirm="removeJob(job)">
+@@ -85,11 +91,11 @@
+ <script lang="ts" setup>
+ import { computed, onMounted, onUnmounted, reactive, ref } from 'vue'
+ import { message } from 'ant-design-vue'
+-import { AimOutlined, DeleteOutlined, ReloadOutlined } from '@ant-design/icons-vue'
++import { AimOutlined, DeleteOutlined, ReloadOutlined, StopOutlined } from '@ant-design/icons-vue'
+ import Title from '/@/components/workspace/Title.vue'
+ import {
+   MappingJob, MappingLayer, MappingMedia, MappingProfile,
+-  createMappingJob, deleteMappingJob, deleteMappingLayer, getMappingJobs, getMappingLayers, getMappingMedia,
++  cancelMappingJob, createMappingJob, deleteMappingJob, deleteMappingLayer, getMappingJobs, getMappingLayers, getMappingMedia,
+ } from '/@/api/mapping'
+ import { layerState, useMappingLayers } from '/@/hooks/use-mapping-layers'
+ 
+@@ -104,7 +110,7 @@ const creating = ref(false)
+ const form = reactive<{ name: string, profile: MappingProfile, keys: string[] }>({ name: '', profile: 'standard', keys: [] })
+ 
+ const statusColor: Record<string, string> = {
+-  QUEUED: 'default', CLAIMED: 'blue', RUNNING: 'processing', DONE: 'success', FAILED: 'error',
++  QUEUED: 'default', CLAIMED: 'blue', RUNNING: 'processing', DONE: 'success', FAILED: 'error', CANCELED: 'warning',
+ }
+ const mediaColumns = [
+   { title: 'File', dataIndex: 'file_name', ellipsis: true },
+@@ -139,6 +145,18 @@ async function removeLayer (layer: MappingLayer) {
+   await refresh()
+ }
+ 
++async function stopJob (job: MappingJob) {
++  try {
++    const r = await cancelMappingJob(job.id)
++    message.success(r.agent_notified_at_next_heartbeat
++      ? `Job "${job.name}" canceled, the compute node stops at its next heartbeat`
++      : `Job "${job.name}" canceled`)
++  } catch (e) {
++    message.error('Canceling the job failed: ' + errorText(e))
++  }
++  await refresh()
++}
++
+ async function removeJob (job: MappingJob) {
+   try {
+     await deleteMappingJob(job.id)
+-- 
+2.47.3
+
