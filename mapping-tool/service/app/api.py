@@ -1,17 +1,20 @@
 """REST endpoints: web UI (/api/mapping/...) and compute agent (/api/mapping/agent/...)."""
 import json
 import logging
+import urllib.error
+import urllib.request
 import uuid
 from datetime import datetime, timezone
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Response
+from fastapi import APIRouter, Depends, Header, HTTPException, Query, Response
 from fastapi.responses import RedirectResponse
 
 from . import db
 from .auth import User, agent_dependency, tile_user_dependency, user_dependency
 from .config import Settings
-from .models import PROFILES, Claim, Complete, Fail, Heartbeat, JobCreate, UploadUrls, AgentRef
+from .models import PROFILES, Claim, Complete, Fail, Heartbeat, JobCreate, RouteCopy, UploadUrls, AgentRef
 from .storage import Storage
+from . import wpml
 
 log = logging.getLogger("mapping.api")
 
@@ -177,6 +180,87 @@ def build_router(settings: Settings, storage: Storage) -> APIRouter:
             return Response(status_code=204)
         key = f"{layer['tile_prefix']}/{z}/{x}/{y}.{fmt}"
         return RedirectResponse(storage.presign_get(layer["bucket"], key, seconds=300), status_code=302)
+
+    # ---------------------------------------------------------------- flight routes (wayline library)
+
+    def wayline_row(user: User, wayline_id: str) -> dict:
+        conn = db.connect(settings, settings.media_database)
+        try:
+            with conn.cursor() as cur:
+                cur.execute("SELECT wayline_id, name, object_key, template_types, drone_model_key FROM wayline_file"
+                            " WHERE workspace_id = %s AND wayline_id = %s", (user.workspace_id, wayline_id))
+                row = cur.fetchone()
+        finally:
+            conn.close()
+        if not row:
+            raise HTTPException(status_code=404, detail="route not found")
+        return row
+
+    def load_kmz(row: dict) -> bytes:
+        resp = storage.internal.get_object(settings.media_bucket, row["object_key"])
+        try:
+            return resp.read()
+        finally:
+            resp.close()
+            resp.release_conn()
+
+    @router.get("/waylines/{wayline_id}")
+    def get_wayline(wayline_id: str, user: User = Depends(current_user)) -> dict:
+        row = wayline_row(user, wayline_id)
+        try:
+            route = wpml.parse(load_kmz(row))
+        except wpml.WpmlError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+        return {
+            "id": row["wayline_id"], "name": row["name"], "drone_model_key": row["drone_model_key"],
+            "template_type": route.template_type, "wpml_namespace": route.wpml_ns,
+            "editable": route.template_type in wpml.EDITABLE_TYPES and route.polygon is not None,
+            "polygon": route.polygon, "params": route.params, "flight_path": route.flight_path,
+        }
+
+    @router.post("/waylines/{wayline_id}/copy", status_code=201)
+    def copy_wayline(wayline_id: str, body: RouteCopy, user: User = Depends(current_user),
+                     x_auth_token: str = Header()) -> dict:
+        row = wayline_row(user, wayline_id)
+        conn = db.connect(settings, settings.media_database)
+        try:
+            with conn.cursor() as cur:
+                cur.execute("SELECT 1 FROM wayline_file WHERE workspace_id = %s AND name = %s",
+                            (user.workspace_id, body.name))
+                if cur.fetchone():
+                    raise HTTPException(status_code=409, detail="a route with this name already exists")
+        finally:
+            conn.close()
+        try:
+            kmz = wpml.edit_copy(load_kmz(row), body.polygon, body.params.model_dump())
+        except wpml.WpmlError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+        # import through the DJI backend, exactly like a manual upload in the web UI
+        boundary = uuid.uuid4().hex
+        payload = (f"--{boundary}\r\nContent-Disposition: form-data; name=\"file\"; filename=\"{body.name}.kmz\"\r\n"
+                   f"Content-Type: application/vnd.google-earth.kmz\r\n\r\n").encode() + kmz + f"\r\n--{boundary}--\r\n".encode()
+        req = urllib.request.Request(
+            f"{settings.dji_api_url}/wayline/api/v1/workspaces/{user.workspace_id}/waylines/file/upload",
+            data=payload, method="POST",
+            headers={"Content-Type": f"multipart/form-data; boundary={boundary}", "x-auth-token": x_auth_token})
+        try:
+            with urllib.request.urlopen(req, timeout=30) as resp:
+                result = json.loads(resp.read() or b"{}")
+        except urllib.error.URLError as exc:
+            raise HTTPException(status_code=502, detail=f"DJI backend not reachable: {exc}") from exc
+        if result.get("code") != 0:
+            raise HTTPException(status_code=502, detail=f"DJI backend rejected the route: {result.get('message')}")
+        conn = db.connect(settings, settings.media_database)
+        try:
+            with conn.cursor() as cur:
+                cur.execute("SELECT wayline_id FROM wayline_file WHERE workspace_id = %s AND name = %s",
+                            (user.workspace_id, body.name))
+                new = cur.fetchone()
+        finally:
+            conn.close()
+        log.info("route %s copied to '%s' by %s", wayline_id, body.name, user.username)
+        return {"id": new["wayline_id"] if new else None, "name": body.name}
 
     # ---------------------------------------------------------------- compute agent
 

@@ -104,3 +104,56 @@ class Complete(AgentRef):
 
 class Fail(AgentRef):
     error: str = Field(min_length=1, max_length=2000)
+
+
+_NAME_RE = re.compile(r"^[A-Za-z0-9_().-][A-Za-z0-9 _().-]{0,58}[A-Za-z0-9_().-]$|^[A-Za-z0-9_().-]$")
+
+
+def _segments_cross(a, b, c, d) -> bool:
+    def orient(p, q, r):
+        return (q[0] - p[0]) * (r[1] - p[1]) - (q[1] - p[1]) * (r[0] - p[0])
+    o1, o2, o3, o4 = orient(a, b, c), orient(a, b, d), orient(c, d, a), orient(c, d, b)
+    return (o1 > 0) != (o2 > 0) and (o3 > 0) != (o4 > 0) and 0 not in (o1, o2, o3, o4)
+
+
+class RouteParams(BaseModel):
+    height: float = Field(ge=10, le=500)            # m, shooting height relative to the height mode
+    direction: int = Field(ge=0, le=359)            # deg, main flight line direction
+    margin: int = Field(ge=0, le=200)               # m, extension beyond the polygon
+    overlap_h: int = Field(ge=10, le=90)            # %, along track
+    overlap_w: int = Field(ge=10, le=90)            # %, across track
+    speed: float = Field(ge=1, le=15)               # m/s
+
+
+class RouteCopy(BaseModel):
+    name: str
+    polygon: list[list[float]] = Field(min_length=3, max_length=100)
+    params: RouteParams
+
+    @field_validator("name")
+    @classmethod
+    def valid_name(cls, name: str) -> str:
+        if not _NAME_RE.match(name):
+            raise ValueError("name: 1-60 chars of A-Z a-z 0-9 space _ ( ) . - (becomes the file name)")
+        return name
+
+    @field_validator("polygon")
+    @classmethod
+    def valid_polygon(cls, poly: list[list[float]]) -> list[list[float]]:
+        for p in poly:
+            if len(p) != 2 or not (-180 <= p[0] <= 180 and -85 <= p[1] <= 85):
+                raise ValueError("polygon points must be [lon, lat]")
+        lons, lats = [p[0] for p in poly], [p[1] for p in poly]
+        if max(lons) - min(lons) > 0.3 or max(lats) - min(lats) > 0.2:
+            raise ValueError("polygon larger than about 20 km")
+        n = len(poly)
+        area2 = sum(poly[i][0] * poly[(i + 1) % n][1] - poly[(i + 1) % n][0] * poly[i][1] for i in range(n))
+        if abs(area2) < 1e-12:
+            raise ValueError("polygon has no area")
+        for i in range(n):
+            for j in range(i + 1, n):
+                if abs(i - j) in (1, n - 1):
+                    continue
+                if _segments_cross(poly[i], poly[(i + 1) % n], poly[j], poly[(j + 1) % n]):
+                    raise ValueError("polygon edges intersect")
+        return poly
