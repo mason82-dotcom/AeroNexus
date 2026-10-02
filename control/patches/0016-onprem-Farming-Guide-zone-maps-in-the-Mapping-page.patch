@@ -1,0 +1,386 @@
+From b28087b8f42c95a02f00f0dbf401f04281105fe5 Mon Sep 17 00:00:00 2001
+From: aeronexus <aeronexus@local>
+Date: Fri, 2 Oct 2026 20:55:29 +0200
+Subject: [PATCH] onprem: Farming Guide zone maps in the Mapping page
+
+Zones button on index layers: create zone maps (classes, method, cell size,
+min. area), list per layer, zones on the map, rates per zone with product and
+unit, total amount, exports (Shapefile, ISO-XML, KML, GeoJSON) from the
+farming service (VITE_FARMING_URL).
+---
+ src/api/farming.ts                       |  71 +++++++++
+ src/api/http/config.ts                   |   2 +
+ src/components/farming/ZoneMapDialog.vue | 193 +++++++++++++++++++++++
+ src/hooks/use-zone-overlay.ts            |  28 ++++
+ src/pages/page-web/projects/mapping.vue  |   8 +-
+ 5 files changed, 301 insertions(+), 1 deletion(-)
+ create mode 100644 src/api/farming.ts
+ create mode 100644 src/components/farming/ZoneMapDialog.vue
+ create mode 100644 src/hooks/use-zone-overlay.ts
+
+diff --git a/src/api/farming.ts b/src/api/farming.ts
+new file mode 100644
+index 0000000..0ac9f18
+--- /dev/null
++++ b/src/api/farming.ts
+@@ -0,0 +1,71 @@
++// AeroNexus Farming Guide service (zone maps, rates, exports). Same login token as the DJI backend.
++import axios from 'axios'
++import { CURRENT_CONFIG } from '/@/api/http/config'
++import { authToken } from '/@/api/mapping'
++import { ELocalStorageKey } from '/@/types/enums'
++
++export type RateUnit = 'kg/ha' | 'l/ha'
++export type ExportFormat = 'geojson' | 'shapefile' | 'kml' | 'isoxml'
++
++export interface Zone {
++  zone: number
++  color: string
++  min: number
++  max: number
++  idx_mean: number | null
++  area_ha: number
++  rate: number | null
++}
++
++export interface ZoneMap {
++  id: string
++  name: string
++  created_at: string
++  created_by: string
++  layer_id: string
++  layer_name: string
++  index: string
++  relative: boolean
++  params: { classes: number, method: 'quantile' | 'equal', cell_m: number, min_area_m2: number }
++  product: string
++  unit: RateUnit
++  zones: Zone[]
++  limits: number[]
++  valid_ha: number
++}
++
++export function farmingBase (): string {
++  return CURRENT_CONFIG.farmingURL.replace(/\/+$/, '')
++}
++
++const http = axios.create({ timeout: 60000 })
++http.interceptors.request.use(config => {
++  config.baseURL = farmingBase()
++  config.headers[ELocalStorageKey.Token] = authToken()
++  return config
++})
++
++export async function createZoneMap (body: { layer_id: string, classes: number, method: string, cell_m: number, min_area_m2: number, name?: string }): Promise<ZoneMap> {
++  return (await http.post('/api/farming/zonemaps', body)).data
++}
++
++export async function listZoneMaps (layerId: string): Promise<ZoneMap[]> {
++  return (await http.get('/api/farming/zonemaps', { params: { layer_id: layerId } })).data
++}
++
++export async function getZoneGeoJson (id: string): Promise<any> {
++  return (await http.get(`/api/farming/zonemaps/${id}/zones.geojson`)).data
++}
++
++export async function saveRates (id: string, body: { product: string, unit: RateUnit, rates: Record<string, number | null> }): Promise<ZoneMap> {
++  return (await http.put(`/api/farming/zonemaps/${id}/rates`, body)).data
++}
++
++export async function deleteZoneMap (id: string): Promise<void> {
++  await http.delete(`/api/farming/zonemaps/${id}`)
++}
++
++// download links (<a href>): the token goes into the query string
++export function exportUrl (id: string, format: ExportFormat): string {
++  return `${farmingBase()}/api/farming/zonemaps/${id}/export/${format}?token=${encodeURIComponent(authToken())}`
++}
+diff --git a/src/api/http/config.ts b/src/api/http/config.ts
+index e69ca48..a926ff7 100644
+--- a/src/api/http/config.ts
++++ b/src/api/http/config.ts
+@@ -13,6 +13,8 @@ export const CURRENT_CONFIG = {
+   websocketURL: env.VITE_WS_URL || '',
+   // AeroNexus mapping service (mapping-tool/service), e.g. http://192.168.1.10:6790/
+   mappingURL: env.VITE_MAPPING_URL || '',
++  // AeroNexus Farming Guide service (farming-guide/service), e.g. http://192.168.1.10:6791/
++  farmingURL: env.VITE_FARMING_URL || '',
+ 
+   // livestreaming (RTMP ingest on MediaMTX)
+   rtmpURL: env.VITE_RTMP_URL || '',
+diff --git a/src/components/farming/ZoneMapDialog.vue b/src/components/farming/ZoneMapDialog.vue
+new file mode 100644
+index 0000000..b111b2e
+--- /dev/null
++++ b/src/components/farming/ZoneMapDialog.vue
+@@ -0,0 +1,193 @@
++<template>
++  <a-modal :visible="visible" :title="`Zones - ${layer ? layer.name : ''}`" width="720px" :footer="null"
++           @cancel="close">
++    <div v-if="layer && layer.relative" class="hint warn">
++      Relative index values (no reflectance panel): zones compare areas within this flight only.
++    </div>
++
++    <!-- create -->
++    <a-form layout="inline" class="create">
++      <a-form-item label="Classes">
++        <a-select v-model:value="form.classes" style="width: 70px">
++          <a-select-option :value="3">3</a-select-option>
++          <a-select-option :value="4">4</a-select-option>
++          <a-select-option :value="5">5</a-select-option>
++        </a-select>
++      </a-form-item>
++      <a-form-item label="Method">
++        <a-select v-model:value="form.method" style="width: 140px">
++          <a-select-option value="quantile">Equal area</a-select-option>
++          <a-select-option value="equal">Equal interval</a-select-option>
++        </a-select>
++      </a-form-item>
++      <a-form-item label="Cell (m)" title="Grid size, e.g. working width or section width">
++        <a-input-number v-model:value="form.cell_m" :min="1" :max="50" style="width: 70px" />
++      </a-form-item>
++      <a-form-item label="Min. area (m2)" title="Smaller patches are merged into their surroundings">
++        <a-input-number v-model:value="form.min_area_m2" :min="0" :max="50000" :step="50" style="width: 90px" />
++      </a-form-item>
++      <a-button type="primary" :loading="busy" @click="create">Create zones</a-button>
++    </a-form>
++
++    <!-- existing zone maps of this layer -->
++    <div v-if="maps.length" class="list">
++      <span class="label">Zone maps:</span>
++      <a-tag v-for="m in maps" :key="m.id" :color="current && current.id === m.id ? 'blue' : 'default'"
++             class="zm" @click="open(m)">
++        {{ m.params.classes }} zones, {{ m.params.method === 'quantile' ? 'equal area' : 'equal interval' }},
++        {{ m.params.cell_m }} m
++      </a-tag>
++    </div>
++
++    <!-- current zone map -->
++    <template v-if="current">
++      <a-table :data-source="current.zones" :columns="columns" :pagination="false" size="small" row-key="zone"
++               class="zones">
++        <template #zone="{ record }">
++          <span class="swatch" :style="{ background: record.color }"></span> {{ record.zone }}
++        </template>
++        <template #range="{ record }">{{ record.min.toFixed(2) }} - {{ record.max.toFixed(2) }}</template>
++        <template #rate="{ record }">
++          <a-input-number v-model:value="rates.values[record.zone]" :min="0" :max="100000" style="width: 110px" />
++        </template>
++      </a-table>
++      <div class="rates">
++        <a-input v-model:value="rates.product" placeholder="Product, e.g. KAS 27" style="width: 220px" :maxlength="40" />
++        <a-select v-model:value="rates.unit" style="width: 90px">
++          <a-select-option value="kg/ha">kg/ha</a-select-option>
++          <a-select-option value="l/ha">l/ha</a-select-option>
++        </a-select>
++        <a-button :loading="busy" @click="save">Save rates</a-button>
++        <span class="label">Total: {{ totalAmount }}</span>
++      </div>
++      <div class="exports">
++        <span class="label">Export:</span>
++        <a :href="exportUrl(current.id, 'shapefile')">Shapefile</a>
++        <a :href="exportUrl(current.id, 'isoxml')" :class="{ disabled: !ratesComplete }"
++           :title="ratesComplete ? 'ISO 11783-10 TASKDATA - verify on the terminal before field use' : 'Save a rate for every zone first'"
++           @click="(e) => { if (!ratesComplete) e.preventDefault() }">ISO-XML (experimental)</a>
++        <a :href="exportUrl(current.id, 'kml')">KML</a>
++        <a :href="exportUrl(current.id, 'geojson')">GeoJSON</a>
++        <a-popconfirm title="Delete this zone map?" ok-text="Delete" cancel-text="Cancel" @confirm="remove">
++          <a class="danger">Delete</a>
++        </a-popconfirm>
++      </div>
++      <div class="hint">Exports use the saved rates. Coordinates WGS84 (EPSG:4326).</div>
++    </template>
++  </a-modal>
++</template>
++
++<script lang="ts" setup>
++import { computed, defineEmits, defineProps, reactive, ref, watch } from 'vue'
++import { message } from 'ant-design-vue'
++import { MappingLayer } from '/@/api/mapping'
++import {
++  RateUnit, ZoneMap, createZoneMap, deleteZoneMap, exportUrl, getZoneGeoJson, listZoneMaps, saveRates,
++} from '/@/api/farming'
++import { clearZones, showZones } from '/@/hooks/use-zone-overlay'
++
++const props = defineProps<{ visible: boolean, layer: MappingLayer | null }>()
++const emit = defineEmits<{ (e: 'close'): void }>()
++
++const busy = ref(false)
++const maps = ref<ZoneMap[]>([])
++const current = ref<ZoneMap | null>(null)
++const form = reactive({ classes: 3, method: 'quantile', cell_m: 5, min_area_m2: 200 })
++const rates = reactive<{ product: string, unit: RateUnit, values: Record<number, number | null> }>({
++  product: '', unit: 'kg/ha', values: {},
++})
++
++const columns = computed(() => [
++  { title: 'Zone', width: 70, slots: { customRender: 'zone' } },
++  { title: `${(current.value?.index || '').toUpperCase()} range`, width: 140, slots: { customRender: 'range' } },
++  { title: 'Mean', dataIndex: 'idx_mean', width: 70 },
++  { title: 'Area (ha)', dataIndex: 'area_ha', width: 90 },
++  { title: `Rate (${rates.unit})`, slots: { customRender: 'rate' } },
++])
++
++const ratesComplete = computed(() => !!current.value && current.value.zones.every(z => z.rate !== null))
++const totalAmount = computed(() => {
++  if (!current.value) return ''
++  const sum = current.value.zones.reduce((acc, z) => acc + (rates.values[z.zone] || 0) * z.area_ha, 0)
++  return `${Math.round(sum)} ${rates.unit === 'kg/ha' ? 'kg' : 'l'} on ${current.value.valid_ha} ha`
++})
++
++function errorText (e: any): string {
++  const d = e?.response?.data?.detail
++  return typeof d === 'string' ? d : (d ? JSON.stringify(d) : String(e))
++}
++
++async function open (m: ZoneMap) {
++  current.value = m
++  rates.product = m.product
++  rates.unit = m.unit
++  rates.values = Object.fromEntries(m.zones.map(z => [z.zone, z.rate]))
++  showZones(await getZoneGeoJson(m.id))
++}
++
++async function load () {
++  if (!props.layer) return
++  maps.value = await listZoneMaps(props.layer.id)
++  if (maps.value.length) await open(maps.value[0])
++}
++
++async function create () {
++  busy.value = true
++  try {
++    const m = await createZoneMap({ layer_id: props.layer!.id, ...form })
++    maps.value = [m, ...maps.value]
++    await open(m)
++  } catch (e) {
++    message.error('Creating zones failed: ' + errorText(e))
++  } finally {
++    busy.value = false
++  }
++}
++
++async function save () {
++  busy.value = true
++  try {
++    const m = await saveRates(current.value!.id, { product: rates.product, unit: rates.unit, rates: rates.values })
++    current.value = m
++    maps.value = maps.value.map(x => (x.id === m.id ? m : x))
++    message.success('Rates saved')
++  } catch (e) {
++    message.error('Saving rates failed: ' + errorText(e))
++  } finally {
++    busy.value = false
++  }
++}
++
++async function remove () {
++  await deleteZoneMap(current.value!.id)
++  maps.value = maps.value.filter(m => m.id !== current.value!.id)
++  current.value = null
++  clearZones()
++  if (maps.value.length) await open(maps.value[0])
++}
++
++function close () {
++  clearZones()
++  current.value = null
++  emit('close')
++}
++
++watch(() => props.visible, (v) => {
++  if (v) {
++    load().catch(e => message.error('Farming service not reachable: ' + errorText(e)))
++  }
++})
++</script>
++
++<style lang="scss" scoped>
++.create { margin: 8px 0; row-gap: 8px; }
++.list { margin: 8px 0; .zm { cursor: pointer; margin-bottom: 4px; } }
++.zones { margin-top: 8px; }
++.swatch { display: inline-block; width: 12px; height: 12px; border-radius: 2px; vertical-align: middle; }
++.rates, .exports { display: flex; align-items: center; gap: 12px; margin-top: 10px; flex-wrap: wrap; }
++.label { color: #888; font-size: 12px; }
++.hint { color: #888; font-size: 12px; margin-top: 6px; }
++.warn { color: #d48806; }
++.danger { color: #ff4d4f; }
++.disabled { color: #bbb; cursor: not-allowed; }
++</style>
+diff --git a/src/hooks/use-zone-overlay.ts b/src/hooks/use-zone-overlay.ts
+new file mode 100644
+index 0000000..b0cdb89
+--- /dev/null
++++ b/src/hooks/use-zone-overlay.ts
+@@ -0,0 +1,28 @@
++// Zone map polygons of the Farming Guide on the shared Leaflet map (one zone map at a time).
++import L from 'leaflet'
++import { getRoot } from '/@/root'
++
++let overlay: L.GeoJSON | null = null
++
++function map (): L.Map | undefined {
++  return getRoot()?.$map?.leaflet
++}
++
++export function showZones (geojson: any, fit = true) {
++  clearZones()
++  const m = map()
++  if (!m) return
++  overlay = L.geoJSON(geojson, {
++    style: (f: any) => ({ color: f.properties.color, weight: 1, fillColor: f.properties.color, fillOpacity: 0.55 }),
++    onEachFeature: (f: any, layer: L.Layer) => {
++      const p = f.properties
++      layer.bindTooltip(`Zone ${p.zone}: ${p.area_ha} ha, index mean ${p.idx_mean}`, { sticky: true })
++    },
++  }).addTo(m)
++  if (fit) m.fitBounds(overlay.getBounds(), { padding: [30, 30] })
++}
++
++export function clearZones () {
++  overlay?.remove()
++  overlay = null
++}
+diff --git a/src/pages/page-web/projects/mapping.vue b/src/pages/page-web/projects/mapping.vue
+index 818761a..74594e9 100644
+--- a/src/pages/page-web/projects/mapping.vue
++++ b/src/pages/page-web/projects/mapping.vue
+@@ -14,6 +14,8 @@
+             <a-switch size="small" :checked="!!layerState.visible[layer.id]" @change="(v) => toggle(layer, v)" />
+             <span class="name" :title="layer.name">{{ layer.name }}</span>
+             <a v-if="layer.bounds_wgs84" title="Zoom to result" @click="zoomTo(layer)"><AimOutlined /></a>
++            <a v-if="layer.legend" title="Management zones and application maps (Farming Guide)"
++               @click="zoneLayer = layer"><AppstoreOutlined /></a>
+             <a-popconfirm title="Delete this layer and its tiles? The job results (COG, report) stay."
+                           ok-text="Delete" cancel-text="Cancel" @confirm="removeLayer(layer)">
+               <a title="Delete layer" class="danger"><DeleteOutlined /></a>
+@@ -75,6 +77,8 @@
+       </div>
+     </div>
+ 
++    <ZoneMapDialog :visible="!!zoneLayer" :layer="zoneLayer" @close="zoneLayer = null" />
++
+     <a-modal v-model:visible="createVisible" title="New mapping job" :confirm-loading="creating"
+              ok-text="Create" :ok-button-props="{ disabled: !canCreate }" width="640px" @ok="submit">
+       <a-form layout="vertical">
+@@ -110,7 +114,8 @@
+ <script lang="ts" setup>
+ import { computed, onMounted, onUnmounted, reactive, ref, watch } from 'vue'
+ import { message } from 'ant-design-vue'
+-import { AimOutlined, DeleteOutlined, ReloadOutlined, StopOutlined } from '@ant-design/icons-vue'
++import { AimOutlined, AppstoreOutlined, DeleteOutlined, ReloadOutlined, StopOutlined } from '@ant-design/icons-vue'
++import ZoneMapDialog from '/@/components/farming/ZoneMapDialog.vue'
+ import Title from '/@/components/workspace/Title.vue'
+ import {
+   MappingJob, MappingLayer, MappingMedia, MappingProfile,
+@@ -125,6 +130,7 @@ const layers = ref<MappingLayer[]>([])
+ const media = ref<MappingMedia[]>([])
+ const mediaLoading = ref(false)
+ const createVisible = ref(false)
++const zoneLayer = ref<MappingLayer | null>(null)
+ const creating = ref(false)
+ const form = reactive<{ name: string, profile: MappingProfile, keys: string[] }>({ name: '', profile: 'standard', keys: [] })
+ 
+-- 
+2.47.3
+
