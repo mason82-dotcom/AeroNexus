@@ -42,6 +42,7 @@ Bisherige Patches:
 - **api 0008:** Kamera-Firmware vom RC im Format `67-0-0` (M3T) wird angenommen
 - **api 0009:** Antworten des RC Plus 2 mit strukturierten Daten (z. B. Livestream-Start der Matrice 4T)
 - **api 0010:** KI-Alarm-Meldungen von Pilot 2 (RC Plus 2) werden quittiert statt mit 404 abgelehnt
+- **api 0011:** RTMP-Adresse mit Sende-Zugangsdaten für MediaMTX; die Zugangsdaten gehen nie an den Browser
 - **control 0001:** Mavic 3M, Matrice 4, RC Pro/RC Plus 2 in der Oberfläche, Konfiguration über Env
 - **control 0002:** Karte AMap ersetzt durch Leaflet/OpenStreetMap
 - **control 0003:** Livestream-Player im Browser (WebRTC/WHEP, HLS-Fallback)
@@ -59,6 +60,7 @@ Bisherige Patches:
 - **control 0015:** Farming Guide auf der Mapping-Seite: Profil Multispektral, Index-Legende und Statistik
 - **control 0016:** Farming Guide: Zonenkarten, Ausbringmengen, Export (Shapefile, ISO-XML, KML, GeoJSON)
 - **control 0017:** Oberfläche auf Deutsch (zentrale Übersetzung `src/locales/de.ts`)
+- **control 0018:** Livestream-Player schicken den Web-Login an MediaMTX (Abspielen nur angemeldet)
 
 Prüfen, ob die Patches vollständig sind und sauber auf die gepinnten Commits passen: `edge/verify-patches.sh`
 
