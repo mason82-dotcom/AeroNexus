@@ -55,6 +55,7 @@ Bisherige Patches:
 - **control 0011:** Mapping-Auftraege abbrechen (auch waehrend der Rechenknoten rechnet)
 - **control 0012:** Vorschaubilder in der Medienliste (Foto, Waermebild, Multispektral)
 - **control 0013:** Fotoparameter in der Medienliste (Aufnahmezeit, Belichtung, GNSS/Hoehe, Gimbal, LRF)
+- **control 0014:** Kamera-/Objektivspalte (Wide, IR, MS-Band ...), Medienliste verschlankt
 
 ## Schnellstart
 

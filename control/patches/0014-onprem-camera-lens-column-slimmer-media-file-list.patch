@@ -1,0 +1,130 @@
+From c7f157266285f0ed55ca1055457c265caed11f73 Mon Sep 17 00:00:00 2001
+From: aeronexus <aeronexus@local>
+Date: Fri, 2 Oct 2026 18:16:59 +0200
+Subject: [PATCH] onprem: camera/lens column, slimmer media file list
+
+New column 'Camera' (Wide, Zoom, IR (thermal), RGB, MS <band> <nm>) from
+dji:ImageSource / BandName, file name suffix as fallback. Removed File Path,
+Payload Type, Gimbal pitch/yaw and Created.
+---
+ src/api/mapping.ts            |  4 ++++
+ src/components/MediaPanel.vue | 39 ++++++++++++++---------------------
+ 2 files changed, 19 insertions(+), 24 deletions(-)
+
+diff --git a/src/api/mapping.ts b/src/api/mapping.ts
+index b7d5587..bc7cd66 100644
+--- a/src/api/mapping.ts
++++ b/src/api/mapping.ts
+@@ -91,6 +91,10 @@ export async function getMappingLayers (): Promise<MappingLayer[]> {
+ }
+ 
+ export interface MediaMeta {
++  lens: string | null // e.g. "Wide", "Zoom", "IR (thermal)", "MS NIR 860(+/-26)nm", "RGB"
++  image_source: string | null // raw dji:ImageSource
++  band: string | null
++  band_freq: string | null
+   captured: string | null // local camera time, ISO without zone
+   model: string | null
+   width: number | null
+diff --git a/src/components/MediaPanel.vue b/src/components/MediaPanel.vue
+index ef3804a..9c11d5e 100644
+--- a/src/components/MediaPanel.vue
++++ b/src/components/MediaPanel.vue
+@@ -15,6 +15,11 @@
+                :src="thumbnailUrl(record.file_id)" />
+           <VideoCameraOutlined v-else-if="/\.(mp4|mov)$/i.test(record.file_name)" class="fz20" />
+         </template>
++        <template #lens="{ record }">
++          <a-tooltip v-if="record.meta?.lens" :title="record.meta.image_source || 'from file name'">
++            <a-tag :color="lensColor(record.meta.lens)">{{ record.meta.lens }}</a-tag>
++          </a-tooltip>
++        </template>
+         <template #captured="{ record }">{{ record.meta?.captured ? record.meta.captured.replace('T', ' ') : '' }}</template>
+         <template #camera="{ record }">
+           <template v-if="record.meta && !record.meta.error">
+@@ -31,12 +36,6 @@
+             <div class="dim">rel {{ fixed(record.meta.rel_alt, 1) }} m &#183; abs {{ fixed(record.meta.abs_alt, 1) }} m</div>
+           </template>
+         </template>
+-        <template #gimbal="{ record }">
+-          <template v-if="record.meta && !record.meta.error">
+-            <div>{{ fixed(record.meta.gimbal_pitch, 1) }}&#176; / {{ fixed(record.meta.gimbal_yaw, 1) }}&#176;</div>
+-            <div v-if="record.meta.lrf_distance" class="dim">LRF {{ fixed(record.meta.lrf_distance, 1) }} m</div>
+-          </template>
+-        </template>
+         <template #size="{ record }">{{ record.meta?.size_bytes ? (record.meta.size_bytes / 1048576).toFixed(1) + ' MB' : '' }}</template>
+         <template #original="{ text }">
+           {{ text }}
+@@ -78,6 +77,12 @@ function exposure (m: MediaMeta): string {
+   if (m.shutter) parts.push(m.shutter === 'Mechanical' ? 'mech.' : 'elec.')
+   return parts.join(' \u00b7 ')
+ }
++function lensColor (lens: string): string {
++  if (lens.startsWith('IR')) return 'volcano'
++  if (lens.startsWith('MS') || lens === 'Multispectral') return 'purple'
++  if (lens === 'Zoom' || lens === 'Tele') return 'cyan'
++  return 'geekblue'
++}
+ function gnssColor (status: string | null): string {
+   return status === 'RTK' ? 'green' : (status === 'Invalid' || !status ? 'default' : 'blue')
+ }
+@@ -106,12 +111,6 @@ const columns = [
+     ellipsis: true,
+     slots: { customRender: 'name' }
+   },
+-  {
+-    title: 'File Path',
+-    dataIndex: 'file_path',
+-    ellipsis: true,
+-    slots: { customRender: 'path' }
+-  },
+   // {
+   //   title: 'FileSize',
+   //   dataIndex: 'size',
+@@ -121,8 +120,9 @@ const columns = [
+     dataIndex: 'drone'
+   },
+   {
+-    title: 'Payload Type',
+-    dataIndex: 'payload'
++    title: 'Camera',
++    width: 170,
++    slots: { customRender: 'lens' }
+   },
+   {
+     title: 'Captured',
+@@ -130,7 +130,7 @@ const columns = [
+     slots: { customRender: 'captured' }
+   },
+   {
+-    title: 'Camera / Exposure',
++    title: 'Model / Exposure',
+     width: 230,
+     slots: { customRender: 'camera' }
+   },
+@@ -139,11 +139,6 @@ const columns = [
+     width: 200,
+     slots: { customRender: 'position' }
+   },
+-  {
+-    title: 'Gimbal pitch / yaw',
+-    width: 140,
+-    slots: { customRender: 'gimbal' }
+-  },
+   {
+     title: 'Size',
+     width: 80,
+@@ -154,10 +149,6 @@ const columns = [
+     dataIndex: 'is_original',
+     slots: { customRender: 'original' }
+   },
+-  {
+-    title: 'Created',
+-    dataIndex: 'create_time'
+-  },
+   {
+     title: 'Action',
+     slots: { customRender: 'action' }
+-- 
+2.47.3
+

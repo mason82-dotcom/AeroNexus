@@ -130,13 +130,13 @@ def build_router(settings: Settings, storage: Storage) -> APIRouter:
             resp.close()
             resp.release_conn()
         try:
-            meta = mediameta.extract(head, stat.size)
+            meta = mediameta.extract(head, stat.size, row["file_name"])
         except Exception:
             meta = None
         if meta is None or meta["width"] is None or meta["captured"] is None:
             resp = storage.internal.get_object(settings.media_bucket, row["object_key"])
             try:
-                meta = mediameta.extract(resp.read(), stat.size)
+                meta = mediameta.extract(resp.read(), stat.size, row["file_name"])
             finally:
                 resp.close()
                 resp.release_conn()
@@ -151,6 +151,8 @@ def build_router(settings: Settings, storage: Storage) -> APIRouter:
             cur.execute(f"SELECT file_id, meta FROM media_meta WHERE workspace_id = %s AND file_id IN ({marks})",
                         [user.workspace_id, *ids])
             result = {r["file_id"]: json.loads(r["meta"]) for r in cur.fetchall()}
+        # rows from an older extractor version are read again
+        result = {k: v for k, v in result.items() if v.get("v") == mediameta.VERSION}
         missing = [i for i in ids if i not in result]
         if missing:
             conn = db.connect(settings, settings.media_database)

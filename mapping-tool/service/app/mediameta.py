@@ -10,6 +10,29 @@ from datetime import datetime
 from PIL import Image
 
 HEAD_BYTES = 256 * 1024
+VERSION = 2                                       # bump when fields change: cached rows are re-extracted
+_DJI_RE = re.compile(r'dji:(ImageSource|BandName|BandFreq)="([^"]{0,60})"')
+
+# dji:ImageSource -> label; unknown values are shown as they are
+_SOURCES = {
+    "WideCamera": "Wide", "ZoomCamera": "Zoom", "TeleCamera": "Tele", "InfraredCamera": "IR (thermal)",
+    "VisibleCamera": "Visible", "MS_CAMERA": "Multispectral", "RGBCamera": "RGB",
+}
+# DJI file name suffix -> label (fallback when the XMP has no ImageSource, e.g. Mavic 3M _D)
+_SUFFIXES = {
+    "W": "Wide", "Z": "Zoom", "T": "IR (thermal)", "V": "Visible", "D": "RGB", "S": "Split screen",
+    "F": "Multispectral", "MS_G": "MS Green", "MS_R": "MS Red", "MS_RE": "MS Red edge", "MS_NIR": "MS NIR",
+}
+_SUFFIX_RE = re.compile(r"_([A-Z]+(?:_[A-Z]+)?)\.[A-Za-z0-9]+$")
+
+
+def lens(source: str | None, band: str | None, freq: str | None, file_name: str) -> str | None:
+    if source and source.startswith("MS_") and source != "MS_CAMERA" and band:
+        return f"MS {band}" + (f" {freq}" if freq else "")
+    if source:
+        return _SOURCES.get(source, source)
+    m = _SUFFIX_RE.search(file_name)
+    return _SUFFIXES.get(m.group(1)) if m else None
 _XMP_RE = re.compile(rb"<x:xmpmeta.*?</x:xmpmeta>", re.S)
 _ATTR_RE = re.compile(r'drone-dji:(\w+)="([^"]{0,200})"')
 _ELEM_RE = re.compile(r"<drone-dji:(\w+)>([^<]{0,200})<")
@@ -48,7 +71,7 @@ def exif(data: bytes) -> dict:
     return out
 
 
-def extract(data: bytes, size_bytes: int | None) -> dict:
+def extract(data: bytes, size_bytes: int | None, file_name: str = "") -> dict:
     """data: file head (or whole file). Raises if neither EXIF nor XMP is readable."""
     try:
         e = exif(data)
@@ -67,7 +90,14 @@ def extract(data: bytes, size_bytes: int | None) -> dict:
     if gps_status == "Invalid" or (lat is not None and abs(lat) < 1e-4 and lon is not None and abs(lon) < 1e-4):
         lat = lon = None
     std = [_num(x.get(k)) for k in ("RtkStdLon", "RtkStdLat")]
+    m = _XMP_RE.search(data)
+    dji = dict(_DJI_RE.findall(m.group(0).decode("utf-8", errors="replace"))) if m else {}
     return {
+        "v": VERSION,
+        "lens": lens(dji.get("ImageSource"), dji.get("BandName"), dji.get("BandFreq"), file_name),
+        "image_source": dji.get("ImageSource"),
+        "band": dji.get("BandName"),
+        "band_freq": dji.get("BandFreq"),
         "captured": captured,
         "model": e.get(0x0110) or x.get("DroneModel"),
         "width": e.get(0xA002) or e.get("width"),
