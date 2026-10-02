@@ -1,0 +1,39 @@
+From 4b8f9ea67d126b85eb0ddee4693190841ec9bf26 Mon Sep 17 00:00:00 2001
+From: RomaN <mason82.rm@googlemail.com>
+Date: Fri, 2 Oct 2026 22:15:11 +0200
+Subject: [PATCH] onprem: load the Agora SDK only when the Agora player is
+ opened
+
+---
+ src/components/livestream-agora.vue | 7 +++++--
+ 1 file changed, 5 insertions(+), 2 deletions(-)
+
+diff --git a/src/components/livestream-agora.vue b/src/components/livestream-agora.vue
+index 9b8a8e5..a8b962c 100644
+--- a/src/components/livestream-agora.vue
++++ b/src/components/livestream-agora.vue
+@@ -102,7 +102,7 @@
+ 
+ <script lang="ts" setup>
+ import { t } from '/@/locales'
+-import AgoraRTC, { IAgoraRTCClient, IAgoraRTCRemoteUser } from 'agora-rtc-sdk-ng'
++import type { IAgoraRTCClient, IAgoraRTCRemoteUser } from 'agora-rtc-sdk-ng'
+ import { message } from 'ant-design-vue'
+ import { onMounted, reactive } from 'vue'
+ import { uuidv4 } from '../utils/uuid'
+@@ -201,8 +201,11 @@ const onRefresh = async () => {
+     })
+ }
+ 
+-onMounted(() => {
++onMounted(async () => {
+   onRefresh()
++  // onprem: load the Agora SDK only when this player is opened. A static import puts it into the main
++  // vendor chunk, and on load it probes camera/microphone, which fails on http (console error on every page).
++  const AgoraRTC = (await import('agora-rtc-sdk-ng')).default
+   agoraClient = AgoraRTC.createClient({ mode: 'live', codec: 'vp8' })
+   agoraClient.setClientRole('audience', { level: 2 })
+   if (agoraClient.connectionState === 'DISCONNECTED') {
+-- 
+2.47.3
+

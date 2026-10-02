@@ -61,6 +61,7 @@ Bisherige Patches:
 - **control 0016:** Farming Guide: Zonenkarten, Ausbringmengen, Export (Shapefile, ISO-XML, KML, GeoJSON)
 - **control 0017:** Oberfläche auf Deutsch (zentrale Übersetzung `src/locales/de.ts`)
 - **control 0018:** Livestream-Player schicken den Web-Login an MediaMTX (Abspielen nur angemeldet)
+- **control 0019:** Agora-SDK wird erst beim Öffnen des Agora-Players geladen (keine Konsolenfehler, Hauptpaket 1,2 MB kleiner)
 
 Prüfen, ob die Patches vollständig sind und sauber auf die gepinnten Commits passen: `edge/verify-patches.sh`
 
