@@ -1,0 +1,30 @@
+{
+  "version": 1,
+  "note": "Vegetation indices of the AeroNexus Farming Guide. All are normalised differences (a - b) / (a + b) of two bands of the ODM multispectral orthophoto. Without a reflectance panel the values are RELATIVE (comparable within one flight only).",
+  "bands": {
+    "green":   ["green", "g"],
+    "red":     ["red", "r"],
+    "rededge": ["rededge", "red edge", "red_edge", "re"],
+    "nir":     ["nir", "near infrared", "nearinfrared"]
+  },
+  "indices": [
+    {
+      "id": "ndvi", "name": "NDVI", "a": "nir", "b": "red",
+      "description": "Biomass and vitality; saturates in dense canopies",
+      "range": [-0.2, 0.9],
+      "palette": [[-0.2, "#a50026"], [0.1, "#f46d43"], [0.3, "#fee08b"], [0.5, "#a6d96a"], [0.7, "#1a9850"], [0.9, "#006837"]]
+    },
+    {
+      "id": "ndre", "name": "NDRE", "a": "nir", "b": "rededge",
+      "description": "Chlorophyll / nitrogen status, also in dense canopies",
+      "range": [0.0, 0.6],
+      "palette": [[0.0, "#a50026"], [0.1, "#f46d43"], [0.2, "#fee08b"], [0.3, "#a6d96a"], [0.45, "#1a9850"], [0.6, "#006837"]]
+    },
+    {
+      "id": "gndvi", "name": "GNDVI", "a": "nir", "b": "green",
+      "description": "Chlorophyll content, more sensitive than NDVI in mid season",
+      "range": [0.0, 0.9],
+      "palette": [[0.0, "#a50026"], [0.2, "#f46d43"], [0.4, "#fee08b"], [0.55, "#a6d96a"], [0.7, "#1a9850"], [0.9, "#006837"]]
+    }
+  ]
+}
