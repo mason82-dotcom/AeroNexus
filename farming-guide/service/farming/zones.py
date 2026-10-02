@@ -55,7 +55,7 @@ def _read(path: str) -> bytes:
     try:
         f = gdal.VSIFOpenL(path, "rb")
     except RuntimeError as exc:
-        raise HttpError(404, "not found") from exc
+        raise HttpError(404, "Nicht gefunden") from exc
     try:
         gdal.VSIFSeekL(f, 0, 2)
         size = gdal.VSIFTellL(f)
@@ -68,7 +68,7 @@ def _read(path: str) -> bytes:
 def _meta(zid: str, workspace_id: str) -> dict:
     meta = json.loads(_read(_key(zid, "meta.json")))
     if meta.get("workspace_id") != workspace_id:
-        raise HttpError(404, "zone map not found")
+        raise HttpError(404, "Zonenkarte nicht gefunden")
     return meta
 
 
@@ -79,12 +79,12 @@ def _layer(user: dict, token: str, layer_id: str) -> dict:
         with urllib.request.urlopen(req, timeout=20) as resp:
             layers = json.loads(resp.read())
     except urllib.error.URLError as exc:
-        raise HttpError(502, f"mapping service not reachable: {exc}") from exc
+        raise HttpError(502, f"Mapping-Dienst nicht erreichbar: {exc}") from exc
     layer = next((l for l in layers if l["id"] == layer_id), None)
     if not layer or not layer.get("job_id"):
-        raise HttpError(404, "layer not found")
+        raise HttpError(404, "Layer nicht gefunden")
     if layer.get("kind") in (None, "orthophoto"):
-        raise HttpError(422, "zones need a vegetation index layer (NDVI, NDRE, GNDVI ...)")
+        raise HttpError(422, "Zonen brauchen einen Vegetationsindex-Layer (NDVI, NDRE, GNDVI ...)")
     return layer
 
 
@@ -109,7 +109,7 @@ def compute(layer: dict, classes: int, method: str, cell_m: float, min_area_m2: 
     values = ds.GetRasterBand(1).ReadAsArray().astype("float32")
     valid = values != NODATA
     if valid.sum() < classes * 4:
-        raise HttpError(422, "too few valid cells for this cell size; choose a smaller cell size")
+        raise HttpError(422, "Zu wenige g\u00fcltige Rasterzellen; bitte ein kleineres Raster w\u00e4hlen")
     cls, limits = _classify(values, valid, classes, method)
 
     mem = gdal.GetDriverByName("MEM").Create("", ds.RasterXSize, ds.RasterYSize, 1, gdal.GDT_Byte)
@@ -177,7 +177,7 @@ def create_zonemap(req, user):
     name = str(body.get("name", "")).strip()[:80]
     if classes not in (3, 4, 5) or method not in ("quantile", "equal") or not (1 <= cell_m <= 50) \
             or not (0 <= min_area <= 50000):
-        raise HttpError(422, "classes 3-5, method quantile|equal, cell_m 1-50, min_area_m2 0-50000")
+        raise HttpError(422, "Klassen 3-5, Methode quantile|equal, Raster 1-50 m, Mindestfl\u00e4che 0-50000 m2")
     layer = _layer(user, req.token, layer_id)
     t0 = time.time()
     summary, geojson, raster = compute(layer, classes, method, cell_m, min_area)
@@ -246,16 +246,16 @@ def set_rates(req, user, zid):
     product = str(body.get("product", "")).strip()[:40]
     rates = body.get("rates") or {}
     if unit not in UNITS:
-        raise HttpError(422, f"unit must be one of {list(UNITS)}")
+        raise HttpError(422, f"Einheit muss eine von {list(UNITS)} sein")
     for z in meta["zones"]:
         value = rates.get(str(z["zone"]), z["rate"])
         if value is not None:
             try:
                 value = float(value)
             except (TypeError, ValueError) as exc:
-                raise HttpError(422, f"rate of zone {z['zone']} is not a number") from exc
+                raise HttpError(422, f"Menge f\u00fcr Zone {z['zone']} ist keine Zahl") from exc
             if not 0 <= value <= 100000:
-                raise HttpError(422, f"rate of zone {z['zone']} out of range 0-100000")
+                raise HttpError(422, f"Menge f\u00fcr Zone {z['zone']} au\u00dferhalb 0-100000")
         z["rate"] = value
     meta.update(unit=unit, product=product, rates_updated_at=time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()))
     _write(_key(zid, "meta.json"), json.dumps(meta).encode())
@@ -342,7 +342,7 @@ def export_kml(meta: dict) -> tuple[bytes, str, str]:
 
 def export_isoxml(meta: dict) -> tuple[bytes, str, str]:
     if any(z["rate"] is None for z in meta["zones"]):
-        raise HttpError(422, "ISO-XML needs a rate for every zone")
+        raise HttpError(422, "ISO-XML braucht f\u00fcr jede Zone eine Menge")
     raster = _read(_key(meta["id"], "classes.tif"))
     data = isoxml.build(meta, raster, UNITS[meta["unit"]][0])
     return data, "application/zip", f"{_safe_name(meta['name'])}_TASKDATA.zip"
@@ -354,7 +354,7 @@ EXPORTS = {"geojson": export_geojson, "shapefile": export_shapefile, "kml": expo
 @route("GET", "/api/farming/zonemaps/{zid}/export/{fmt}")
 def export(req, user, zid, fmt):
     if fmt not in EXPORTS:
-        raise HttpError(404, f"format must be one of {list(EXPORTS)}")
+        raise HttpError(404, f"Format muss eines von {list(EXPORTS)} sein")
     meta = _meta(zid, user["workspace_id"])
     data, ctype, filename = EXPORTS[fmt](meta)
     log.info("zone map %s exported as %s by %s", zid, fmt, user.get("username"))

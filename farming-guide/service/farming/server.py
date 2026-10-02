@@ -47,14 +47,14 @@ class Request:
         if self._body is None:
             length = int(self.headers.get("Content-Length") or 0)
             if length > MAX_BODY:
-                raise HttpError(413, "request too large")
+                raise HttpError(413, "Anfrage zu gro\u00df")
             raw = self.handler.rfile.read(length) if length else b""
             try:
                 self._body = json.loads(raw or b"{}")
             except json.JSONDecodeError as exc:
-                raise HttpError(422, "invalid JSON") from exc
+                raise HttpError(422, "Ung\u00fcltiges JSON") from exc
         if not isinstance(self._body, dict):
-            raise HttpError(422, "JSON object expected")
+            raise HttpError(422, "JSON-Objekt erwartet")
         return self._body
 
     @property
@@ -103,9 +103,9 @@ class Handler(BaseHTTPRequestHandler):
                 self._send(exc.status, {"detail": exc.detail})
             except Exception:
                 log.error("%s %s failed:\n%s", method, req.path, traceback.format_exc())
-                self._send(500, {"detail": "internal error, see service log"})
+                self._send(500, {"detail": "Interner Fehler, siehe Dienst-Log"})
             return
-        self._send(404, {"detail": "not found"})
+        self._send(404, {"detail": "Nicht gefunden"})
 
     def do_GET(self):
         self._dispatch("GET")

@@ -16,17 +16,17 @@ class User:
 
 def decode_user(settings: Settings, token: str | None) -> User:
     if not token:
-        raise HTTPException(status_code=401, detail="token missing")
+        raise HTTPException(status_code=401, detail="Anmeldung fehlt")
     try:
         claims = jwt.decode(
             token, settings.jwt_secret, algorithms=["HS256"], issuer="DJI",
             options={"require": ["exp", "iss"]},
         )
     except jwt.PyJWTError as exc:
-        raise HTTPException(status_code=401, detail="invalid token") from exc
+        raise HTTPException(status_code=401, detail="Anmeldung ung\u00fcltig oder abgelaufen") from exc
     workspace_id = claims.get("workspace_id")
     if not workspace_id:
-        raise HTTPException(status_code=401, detail="token without workspace")
+        raise HTTPException(status_code=401, detail="Anmeldung ohne Arbeitsbereich")
     return User(workspace_id=workspace_id, username=str(claims.get("username", "")))
 
 

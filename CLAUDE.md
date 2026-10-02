@@ -14,7 +14,15 @@ Self-hosted drone platform on DJI Cloud API (DJI Pilot 2 -> own server). Monorep
 - Generated files live in `edge/runtime/` (gitignored), data in `edge/data/`, logs in `edge/logs/`.
 - `SERVER_HOST` must be reachable from the remote controller. Never put docker hostnames into
   anything that is handed to DJI Pilot 2 (MQTT host, OSS endpoint, RTMP URL, web base URL).
-- ASCII-only source/config files.
+- ASCII-only source/config files. Single exception: `control` web `src/locales/de.ts` (German UI texts,
+  UTF-8 with real umlauts). Services write umlauts in user-facing messages as `ä`-style escapes.
+
+## UI language
+- The web UI is German. Code keeps English texts as keys: `$t('...')` in templates, `t('...')` from
+  `/@/locales` in scripts, placeholders `{0}`, `{1}`. Every new key needs an entry in `src/locales/de.ts`
+  (missing keys fall back to English). antd/moment run with locale `de`.
+- Service error `detail` texts shown in the UI are German; agent-facing messages stay English
+  (the compute agent matches on "canceled").
 
 ## Device model keys (domain-type-subtype)
 | Device | Key |

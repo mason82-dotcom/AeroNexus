@@ -16,20 +16,20 @@ def _b64(data: str) -> bytes:
 
 def decode(token: str | None, secret: str) -> dict:
     if not token:
-        raise AuthError("token missing")
+        raise AuthError("Anmeldung fehlt")
     try:
         header_b64, payload_b64, sig_b64 = token.split(".")
         header = json.loads(_b64(header_b64))
         payload = json.loads(_b64(payload_b64))
     except (ValueError, json.JSONDecodeError) as exc:
-        raise AuthError("malformed token") from exc
+        raise AuthError("Anmeldung ung\u00fcltig") from exc
     if header.get("alg") != "HS256":
-        raise AuthError("unsupported algorithm")
+        raise AuthError("Anmeldung ung\u00fcltig (Algorithmus)")
     expected = hmac.new(secret.encode(), f"{header_b64}.{payload_b64}".encode(), hashlib.sha256).digest()
     if not hmac.compare_digest(expected, _b64(sig_b64)):
-        raise AuthError("bad signature")
+        raise AuthError("Anmeldung ung\u00fcltig (Signatur)")
     if payload.get("iss") != "DJI" or "exp" not in payload or payload["exp"] < time.time():
-        raise AuthError("expired or foreign token")
+        raise AuthError("Anmeldung abgelaufen oder fremd")
     if not payload.get("workspace_id"):
-        raise AuthError("token without workspace")
+        raise AuthError("Anmeldung ohne Arbeitsbereich")
     return payload

@@ -34,24 +34,24 @@ class Route:
 
 def _read_zip(kmz: bytes) -> dict[str, bytes]:
     if len(kmz) > MAX_KMZ_BYTES:
-        raise WpmlError("KMZ too large")
+        raise WpmlError("KMZ zu gro\u00df")
     try:
         with zipfile.ZipFile(io.BytesIO(kmz)) as zf:
             out = {}
             for info in zf.infolist():
                 if info.file_size > MAX_KMZ_BYTES:
-                    raise WpmlError(f"{info.filename} too large")
+                    raise WpmlError(f"{info.filename} zu gro\u00df")
                 out[info.filename] = zf.read(info)
             return out
     except zipfile.BadZipFile as exc:
-        raise WpmlError("not a KMZ (zip) file") from exc
+        raise WpmlError("keine KMZ-Datei (ZIP)") from exc
 
 
 def _wpml_ns(root: ET.Element) -> str:
     for el in root.iter():
         if el.tag.startswith("{http://www.dji.com/wpmz/"):
             return el.tag[1:].split("}")[0]
-    raise WpmlError("no wpml namespace found")
+    raise WpmlError("kein WPML-Namespace gefunden")
 
 
 def _find(root: ET.Element, ns: str, name: str) -> ET.Element | None:
@@ -82,7 +82,7 @@ def _polygon(root: ET.Element) -> tuple[ET.Element | None, list[list[float]] | N
 def parse(kmz: bytes) -> Route:
     files = _read_zip(kmz)
     if TEMPLATE not in files:
-        raise WpmlError("wpmz/template.kml missing")
+        raise WpmlError("wpmz/template.kml fehlt")
     root = safe_fromstring(files[TEMPLATE])
     ns = _wpml_ns(root)
     ttype_el = _find(root, ns, "templateType")
@@ -118,7 +118,7 @@ def _fmt(value: float, digits: int = 6) -> str:
 def _wpml_prefix(text: str, ns: str) -> str:
     m = re.search(r'xmlns:([A-Za-z_][\w.-]*)="' + re.escape(ns) + '"', text)
     if not m:
-        raise WpmlError("wpml namespace prefix not found")
+        raise WpmlError("WPML-Namespace-Pr\u00e4fix nicht gefunden")
     return m.group(1)
 
 
@@ -145,12 +145,12 @@ def edit_copy(kmz: bytes, polygon: list[list[float]], params: dict) -> bytes:
     files = _read_zip(kmz)
     raw = files.get(TEMPLATE)
     if raw is None:
-        raise WpmlError("wpmz/template.kml missing")
+        raise WpmlError("wpmz/template.kml fehlt")
     root = safe_fromstring(raw)
     ns = _wpml_ns(root)
     ttype = _find(root, ns, "templateType")
     if ttype is None or (ttype.text or "").strip() not in EDITABLE_TYPES:
-        raise WpmlError("only mapping2d routes can be edited")
+        raise WpmlError("nur Fl\u00e4chenrouten (mapping2d) sind bearbeitbar")
     text = raw.decode("utf-8")
     prefix = _wpml_prefix(text, ns)
 
@@ -159,7 +159,7 @@ def edit_copy(kmz: bytes, polygon: list[list[float]], params: dict) -> bytes:
     start = text.find("<coordinates>", poly_at)
     end = text.find("</coordinates>", start)
     if poly_at < 0 or start < 0 or end < 0:
-        raise WpmlError("template has no polygon")
+        raise WpmlError("Vorlage enth\u00e4lt kein Polygon")
     inner = text[start + len("<coordinates>"):end]
     tokens = inner.split()
     closed = len(tokens) > 1 and tokens[0] == tokens[-1]
@@ -193,7 +193,7 @@ def edit_copy(kmz: bytes, polygon: list[list[float]], params: dict) -> bytes:
     check = parse_template(text.encode("utf-8"))
     if check is None or len(check) != len(polygon) or any(
             abs(a[0] - b[0]) > 1e-9 or abs(a[1] - b[1]) > 1e-9 for a, b in zip(check, polygon)):
-        raise WpmlError("internal error: edited polygon does not round-trip")
+        raise WpmlError("interner Fehler: bearbeitetes Polygon nicht reproduzierbar")
 
     out = io.BytesIO()
     with zipfile.ZipFile(out, "w", zipfile.ZIP_DEFLATED) as zf:

@@ -198,7 +198,7 @@ def build_router(settings: Settings, storage: Storage) -> APIRouter:
         finally:
             conn.close()
         if not row or not thumbs.supported(row["file_name"]):
-            raise HTTPException(status_code=404, detail="no thumbnail for this file")
+            raise HTTPException(status_code=404, detail="Kein Vorschaubild f\u00fcr diese Datei")
 
         def load() -> bytes:
             resp = storage.internal.get_object(settings.media_bucket, row["object_key"])
@@ -212,7 +212,7 @@ def build_router(settings: Settings, storage: Storage) -> APIRouter:
             data = thumbs.get_or_create(settings.cache_dir, file_id, load)
         except Exception as exc:
             log.warning("thumbnail for %s failed: %s", row["file_name"], exc)
-            raise HTTPException(status_code=422, detail="image cannot be decoded") from exc
+            raise HTTPException(status_code=422, detail="Bild kann nicht gelesen werden") from exc
         return Response(content=data, media_type="image/jpeg",
                         headers={"Cache-Control": "private, max-age=604800"})
 
@@ -258,7 +258,7 @@ def build_router(settings: Settings, storage: Storage) -> APIRouter:
             cur.execute("SELECT * FROM mapping_job WHERE id = %s AND workspace_id = %s", (job_id, user.workspace_id))
             row = cur.fetchone()
             if not row:
-                raise HTTPException(status_code=404, detail="job not found")
+                raise HTTPException(status_code=404, detail="Auftrag nicht gefunden")
             cur.execute("SELECT kind, object_key, sha256, size_bytes FROM mapping_result WHERE job_id = %s", (job_id,))
             results = cur.fetchall()
         return {**_job_out(row), "results": results}
@@ -278,9 +278,9 @@ def build_router(settings: Settings, storage: Storage) -> APIRouter:
                         (job_id, user.workspace_id))
             row = cur.fetchone()
             if not row:
-                raise HTTPException(status_code=404, detail="job not found")
+                raise HTTPException(status_code=404, detail="Auftrag nicht gefunden")
             if row["status"] not in ("QUEUED", *ACTIVE):
-                raise HTTPException(status_code=409, detail=f"job is already {row['status']}")
+                raise HTTPException(status_code=409, detail=f"Auftrag ist bereits {row['status']}")
             running = row["status"] in ACTIVE
             cur.execute(
                 "UPDATE mapping_job SET status = 'CANCELED', lease_until = NULL, finished_at = UTC_TIMESTAMP(3),"
@@ -299,9 +299,9 @@ def build_router(settings: Settings, storage: Storage) -> APIRouter:
                         (job_id, user.workspace_id))
             row = cur.fetchone()
             if not row:
-                raise HTTPException(status_code=404, detail="job not found")
+                raise HTTPException(status_code=404, detail="Auftrag nicht gefunden")
             if row["status"] in ACTIVE:
-                raise HTTPException(status_code=409, detail="job is being processed by a compute node")
+                raise HTTPException(status_code=409, detail="Auftrag wird gerade auf einem Rechenknoten verarbeitet")
             deleted = storage.delete_prefix(settings.results_bucket, f"{job_id}/")
             cur.execute("DELETE FROM map_layer WHERE job_id = %s", (job_id,))
             layers = cur.rowcount
@@ -317,7 +317,7 @@ def build_router(settings: Settings, storage: Storage) -> APIRouter:
                         (layer_id, user.workspace_id))
             layer = cur.fetchone()
             if not layer:
-                raise HTTPException(status_code=404, detail="layer not found")
+                raise HTTPException(status_code=404, detail="Layer nicht gefunden")
             deleted = storage.delete_prefix(layer["bucket"], layer["tile_prefix"].rstrip("/") + "/")
             cur.execute("DELETE FROM map_layer WHERE id = %s", (layer_id,))
         log.info("layer %s deleted by %s (%d tiles)", layer_id, user.username, deleted)
@@ -329,7 +329,7 @@ def build_router(settings: Settings, storage: Storage) -> APIRouter:
             cur.execute("SELECT * FROM map_layer WHERE id = %s AND workspace_id = %s", (layer_id, user.workspace_id))
             layer = cur.fetchone()
         if not layer or fmt != layer["tile_format"]:
-            raise HTTPException(status_code=404, detail="layer not found")
+            raise HTTPException(status_code=404, detail="Layer nicht gefunden")
         if not layer["min_zoom"] <= z <= layer["max_zoom"] or not (0 <= x < 2 ** z and 0 <= y < 2 ** z):
             return Response(status_code=204)
         key = f"{layer['tile_prefix']}/{z}/{x}/{y}.{fmt}"
@@ -347,7 +347,7 @@ def build_router(settings: Settings, storage: Storage) -> APIRouter:
         finally:
             conn.close()
         if not row:
-            raise HTTPException(status_code=404, detail="route not found")
+            raise HTTPException(status_code=404, detail="Route nicht gefunden")
         return row
 
     def load_kmz(row: dict) -> bytes:
@@ -382,7 +382,7 @@ def build_router(settings: Settings, storage: Storage) -> APIRouter:
                 cur.execute("SELECT 1 FROM wayline_file WHERE workspace_id = %s AND name = %s",
                             (user.workspace_id, body.name))
                 if cur.fetchone():
-                    raise HTTPException(status_code=409, detail="a route with this name already exists")
+                    raise HTTPException(status_code=409, detail="Eine Route mit diesem Namen existiert bereits")
         finally:
             conn.close()
         try:
@@ -402,9 +402,9 @@ def build_router(settings: Settings, storage: Storage) -> APIRouter:
             with urllib.request.urlopen(req, timeout=30) as resp:
                 result = json.loads(resp.read() or b"{}")
         except urllib.error.URLError as exc:
-            raise HTTPException(status_code=502, detail=f"DJI backend not reachable: {exc}") from exc
+            raise HTTPException(status_code=502, detail=f"DJI-Backend nicht erreichbar: {exc}") from exc
         if result.get("code") != 0:
-            raise HTTPException(status_code=502, detail=f"DJI backend rejected the route: {result.get('message')}")
+            raise HTTPException(status_code=502, detail=f"DJI-Backend hat die Route abgelehnt: {result.get('message')}")
         conn = db.connect(settings, settings.media_database)
         try:
             with conn.cursor() as cur:
