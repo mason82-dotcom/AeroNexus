@@ -164,6 +164,11 @@ def process(iid: str) -> None:
                 _update(iid, progress=round(100 * n / len(files)))
             except HttpError:                             # deleted while running
                 return
+    try:
+        _load(iid, "meta.json")
+    except HttpError:                                     # deleted while running: leave no files behind
+        log.info("inspection %s was deleted during processing", iid[:8])
+        return
     merged = analysis.merge(found, float(meta["params"].get("merge_m", 1.0)))
     for a in merged:
         crop, crop_rgb = a.pop("crop", None), a.pop("crop_rgb", None)

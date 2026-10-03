@@ -211,12 +211,12 @@ def build_waylines(old_waylines: str, prefix: str, lanes: list, height: float, s
     for i, p in enumerate(points):
         last = i == n - 1
         heading = 0.0 if last else _bearing(p, points[i + 1])
-        pm = [f"      <Placemark>",
-              f"        <Point>",
-              f"          <coordinates>",
+        pm = ["      <Placemark>",
+              "        <Point>",
+              "          <coordinates>",
               f"            {p[0]:.15g},{p[1]:.15g}",
-              f"          </coordinates>",
-              f"        </Point>",
+              "          </coordinates>",
+              "        </Point>",
               f"        <{prefix}:index>{i}</{prefix}:index>",
               f"        <{prefix}:executeHeight>{_fmt(height, 3)}</{prefix}:executeHeight>",
               f"        <{prefix}:waypointSpeed>{_fmt(speed, 3)}</{prefix}:waypointSpeed>",
@@ -278,7 +278,7 @@ def build_waylines(old_waylines: str, prefix: str, lanes: list, height: float, s
                f"        </{prefix}:waypointGimbalHeadingParam>",
                f"        <{prefix}:isRisky>0</{prefix}:isRisky>",
                f"        <{prefix}:waypointWorkType>0</{prefix}:waypointWorkType>",
-               f"      </Placemark>"]
+               "      </Placemark>"]
         out += pm
     out += ["    </Folder>", "  </Document>", "</kml>", ""]
     info = {"waypoints": n, "lanes": len(lanes), "length_m": round(length), "duration_s": round(duration),
@@ -356,6 +356,10 @@ def edit_copy(kmz: bytes, polygon: list[list[float]], params: dict) -> bytes:
     path = params.get("path")
     if path:
         # executable path generated from the planned lanes (Pilot 2 flies waylines.wpml as it is)
+        mode = _find(root, ns, "heightMode")
+        if mode is not None and (mode.text or "").strip() != "relativeToStartPoint":
+            raise WpmlError(f"Vorlage mit H\u00f6henmodus {(mode.text or '').strip()} wird nicht unterst\u00fctzt "
+                            "(nur relativ zum Startpunkt)")
         for name in PATH_OFF_SWITCHES:
             text = _replace_value(text, prefix, name, "0")
         old = files.get(WAYLINES, b"").decode("utf-8")
@@ -366,6 +370,8 @@ def edit_copy(kmz: bytes, polygon: list[list[float]], params: dict) -> bytes:
                                         path["photo_spacing"], lens_index.strip())
         files[WAYLINES] = waylines.encode("utf-8")
         params["path_info"] = info
+        if abs(info["speed"] - params["speed"]) > 1e-6:          # speed was reduced for the overlap: same in both files
+            text = _replace_value(text, prefix, "autoFlightSpeed", _fmt(info["speed"], 3))
 
     out = io.BytesIO()
     with zipfile.ZipFile(out, "w", zipfile.ZIP_DEFLATED) as zf:

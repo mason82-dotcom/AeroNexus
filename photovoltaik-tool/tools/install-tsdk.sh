@@ -20,7 +20,7 @@ if [ -z "$TOOL" ]; then
   find "$TMP" -type f -name 'dji_irp*' | sed "s|$TMP/||"
   exit 1
 fi
-rm -rf "$DEST/bin"
+rm -rf "${DEST:?}/bin"
 mkdir -p "$DEST/bin"
 cp -a "$(dirname "$TOOL")"/. "$DEST/bin/"
 chmod +x "$DEST/bin/dji_irp"

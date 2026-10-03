@@ -7,16 +7,13 @@ import csv
 import io
 import json
 import os
-import struct
 import unittest
 import uuid
-from xml.etree import ElementTree as ET
 
 os.environ.setdefault("JWT_SECRET", "test-secret")
 for _n in ("AWS_S3_ENDPOINT", "AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY"):
     os.environ.setdefault(_n, "unused")
 
-import numpy as np                                    # noqa: E402
 from osgeo import gdal                                # noqa: E402
 
 from pv import inspections, rjpeg, storage            # noqa: E402

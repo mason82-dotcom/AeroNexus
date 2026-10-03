@@ -109,7 +109,7 @@ def build(ortho: Path, work: Path, out: Path, definitions: dict, target_crs: str
             log.warning("index %s skipped: band %s missing", index["id"], a if a not in bands else b)
             continue
         raw = work / f"{index['id']}_raw.tif"
-        mask = f"(C > 0)" if alpha else "1"
+        mask = "(C > 0)" if alpha else "1"
         cmd = ["gdal_calc", "--quiet", "--overwrite", "--type=Float32", f"--NoDataValue={NODATA}",
                "-A", str(ortho), f"--A_band={bands[a]}", "-B", str(ortho), f"--B_band={bands[b]}"]
         if alpha:

@@ -11,7 +11,8 @@ trap 'rm -rf "$TMP"' EXIT
 rc=0
 
 check () {  # name repo commit patchdir runtime_dir
-  local name=$1 repo=$2 commit=$3 patches=$4 rt=$5 src=$2
+  local name=$1 repo=$2 commit=$3 patches=$4 rt=$5
+  local src=$repo
   [ -d "$rt/.git" ] && src="$rt"   # local clone has all upstream objects, no network needed
   git -c init.defaultBranch=main -c advice.detachedHead=false clone -q "$src" "$TMP/$name"
   git -C "$TMP/$name" checkout -q "$commit"

@@ -19,8 +19,8 @@ MINIO_IMAGE=aeronexus/minio:RELEASE.2025-10-15T17-29-55Z
 mode="" dump=""
 while [ $# -gt 0 ]; do
   case "$1" in
-    --test) mode=test ;;
-    --yes) mode=live ;;
+    --test) mode="test" ;;
+    --yes) mode="live" ;;
     --dump) dump="$2"; shift ;;
     *) echo "usage: $0 --test | --yes [--dump FILE]"; exit 1 ;;
   esac

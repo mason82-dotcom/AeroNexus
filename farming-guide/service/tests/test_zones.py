@@ -189,7 +189,7 @@ class ZoneMapFlowTest(unittest.TestCase):
         _, data, _, _ = zones.export(Request(), USER, zid, "isoxml")
         with zipfile.ZipFile(io.BytesIO(data)) as zf:
             xml = ET.fromstring(zf.read("TASKDATA/TASKDATA.XML"))
-            cells = zf.read("TASKDATA/GRD00001.BIN")
+            self.assertTrue(zf.read("TASKDATA/GRD00001.BIN"))
         tzn = {int(t.get("A")): t.find("PDV") for t in xml.iter("TZN")}
         self.assertEqual({k: v.get("B") for k, v in tzn.items()}, {0: "0", 1: "18000", 2: "15000", 3: "12050"})
         self.assertTrue(all(v.get("A") == "0006" for v in tzn.values()))      # kg/ha -> DDI 0006

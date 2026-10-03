@@ -86,13 +86,29 @@ class GeneratedPathTest(unittest.TestCase):
 
     def test_speed_is_reduced_to_keep_the_overlap(self):
         params, _ = plan_params(self.poly, dict(PARAMS, speed=15, height=30))
-        wpml.edit_copy(fx.make_kmz(), self.poly, params)
+        out = wpml.edit_copy(fx.make_kmz(), self.poly, params)
         self.assertGreaterEqual(params["path_info"]["shot_interval_s"], wpml.MIN_SHOT_INTERVAL - 0.01)
         self.assertLess(params["path_info"]["speed"], 15)
+        # template shows the same (reduced) speed as the executable path
+        tpl_speed = float(re.findall(r"<wpml:autoFlightSpeed>([^<]*)<", fx.read(out, "wpmz/template.kml").decode())[0])
+        wl_speed = float(re.findall(r"<wpml:autoFlightSpeed>([^<]*)<", fx.read(out, "wpmz/waylines.wpml").decode())[0])
+        self.assertAlmostEqual(tpl_speed, wl_speed, places=2)
+        self.assertAlmostEqual(tpl_speed, params["path_info"]["speed"], places=2)
+
+    def test_absolute_height_mode_is_refused(self):
+        kmz = fx.make_kmz()
+        import io
+        import zipfile
+        text = fx.template_text().replace("relativeToStartPoint", "EGM96")
+        buf = io.BytesIO()
+        with zipfile.ZipFile(buf, "w") as zf:
+            zf.writestr("wpmz/template.kml", text)
+            zf.writestr("wpmz/waylines.wpml", fx.read(kmz, "wpmz/waylines.wpml"))
+        with self.assertRaisesRegex(wpml.WpmlError, "EGM96"):
+            wpml.edit_copy(buf.getvalue(), self.poly, dict(self.params))
 
     def test_thermal_lens_and_image_format(self):
         params, lanes = plan_params(self.poly, dict(PARAMS, image_format="ir"), ("1-67-0", "thermal"))
-        kmz = fx.make_kmz()
         text = fx.template_text().replace("      <Placemark>\n", "      <wpml:payloadParam>\n"
                                           "        <wpml:imageFormat>visable</wpml:imageFormat>\n"
                                           "      </wpml:payloadParam>\n      <Placemark>\n", 1)
