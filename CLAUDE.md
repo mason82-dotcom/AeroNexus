@@ -117,6 +117,7 @@ Editing routes (mapping-tool/service/app/wpml.py, verified with Pilot 2 on RC Pr
   `mapping-tool/basemaps/fetch-orthophoto.sh` from the LGL BW WMTS (DOP20, open data dl-de/by-2-0, attribution
   "LGL-BW (<year>) dl-de/by-2-0" is mandatory). Tile matrix ids are "GoogleMapsCompatible:<z>". Download is
   resumable (MBTiles in edge/data/basemaps/.cache), failed tiles get two slow retry passes, then -> PMTiles.
+  Verified in the browser 2026-10-03 (luftbild-home, 5 km, 467 MB).
 - MinIO CE: no images/binaries published anymore -> built from pinned source in `evidence/docker/minio`
   (minio RELEASE.2025-10-15T17-29-55Z, mc RELEASE.2025-08-13T08-35-41Z). No further security fixes;
   LAN only. Phase 2: evaluate STS-capable replacement.
