@@ -16,6 +16,7 @@ RAW_W, RAW_H = 640, 512
 PIXEL_PITCH_MM = 0.012          # 12 um VOx sensor of M3T and M4T
 _XMP_RE = re.compile(r'drone-dji:(\w+)="([^"]*)"')
 _EXIF_FOCAL = 0x920A
+_EXIF_FOCAL35 = 0xA405
 
 
 class RJpegError(ValueError):
@@ -81,6 +82,12 @@ def is_rjpeg(data: bytes) -> bool:
 
 
 def _exif_focal_mm(data: bytes) -> float | None:
+    return exif_focal(data)[0]
+
+
+def exif_focal(data: bytes) -> tuple[float | None, int | None]:
+    """(focal length mm, 35 mm equivalent focal length) from the EXIF sub-IFD."""
+    focal, focal35 = None, None
     for marker, payload in _segments(data):
         if marker != 0xE1 or not payload.startswith(b"Exif\x00\x00"):
             continue
@@ -107,8 +114,11 @@ def _exif_focal_mm(data: bytes) -> float | None:
             for t2, typ2, c2, v2 in ifd_entries(value):
                 if t2 == _EXIF_FOCAL and typ2 == 5 and v2 + 8 <= len(tiff):   # RATIONAL
                     num, den = struct.unpack(endian + "II", tiff[v2:v2 + 8])
-                    return num / den if den else None
-    return None
+                    focal = num / den if den else None
+                elif t2 == _EXIF_FOCAL35 and typ2 == 3:                      # SHORT, stored in the value field
+                    focal35 = (v2 & 0xFFFF) if endian == "<" else (v2 >> 16)
+            return focal, focal35
+    return focal, focal35
 
 
 def _xmp(data: bytes) -> dict[str, str]:

@@ -65,6 +65,7 @@ Bisherige Patches:
 - **control 0020:** Offline-Karte (Vektorkarte als PMTiles, protomaps-leaflet) als Standard-Ebene
 - **control 0021:** Seite Photovoltaik: Inspektionen, Hotspots auf der Karte, Bildausschnitte, Status, Bericht/CSV/GeoJSON
 - **control 0022:** Flugplanung: neue Flächenroute aus einer Pilot-Vorlage (Zweck, Bodenauflösung, Vorschau der Bahnen)
+- **control 0023:** Photovoltaik: Normalbild-Ausschnitt neben dem Wärmebild, PDF-Bericht
 
 Prüfen, ob die Patches vollständig sind und sauber auf die gepinnten Commits passen: `edge/verify-patches.sh`
 

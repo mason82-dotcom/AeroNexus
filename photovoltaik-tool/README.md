@@ -16,8 +16,11 @@ Dienst `photovoltaik-tool/service` (Compose-Dienst `pv`, Port 6792), Oberfläche
      3 dringend (ab 20 K), einstellbar
    - Position aus GPS, Gimbalwinkeln und Höhe; bei Dächern die Höhe des Laser-Entfernungsmessers
    - derselbe Fehler in überlappenden Bildern wird zusammengefasst (Umkreis einstellbar)
-4. Ergebnis: Marker auf der Karte (Farbe = Klasse), Liste, Detail mit Bildausschnitt, Status
-   (offen / bestätigt / verworfen) und Notiz; Export als Bericht (HTML, im Browser als PDF drucken), CSV, GeoJSON.
+4. Ergebnis: Marker auf der Karte (Farbe = Klasse), Liste, Detail mit Wärmebild- und Normalbild-Ausschnitt,
+   Status (offen / bestätigt / verworfen) und Notiz; Export als PDF-Bericht, HTML-Bericht, CSV, GeoJSON.
+   Das Normalbild ist das gleichzeitig aufgenommene Foto (`_V`/`_W`, auch mit 1–2 s späterem Zeitstempel);
+   der Ausschnitt wird über die Brennweiten beider Kameras bestimmt. Bei Zoom-Aufnahmen fehlt er, wenn der Fund
+   außerhalb des Zoombilds liegt. Für Normalbilder in der Planung „Weitwinkel + Wärmebild“ wählen.
 
 Aussagekräftig nur bei Einstrahlung über 600 W/m², klarem Himmel und Anlage unter Last.
 Fehlerart (Zelle, Substring, Modul, String) und Fläche sind Schätzungen aus der Bildgeometrie.

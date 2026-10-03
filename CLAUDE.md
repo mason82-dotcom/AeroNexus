@@ -140,3 +140,6 @@ Editing routes (mapping-tool/service/app/wpml.py, verified with Pilot 2 on RC Pr
 - Detection (detect.py): p75 block background, candidates >= min_delta, Delta-T against a 4 px ring (p75),
   long (> half image) / large (> 5 %) areas dropped but searched for spots inside. Geo (geo.py): pinhole ray
   onto a plane at LRF target height (roofs) or take-off height. Keep tests for both (synthetic scenes).
+- Visible crop: sibling `_V`/`_W`/`_Z` with the same index and a time stamp up to +-2 s (Pilot 2 often stamps the
+  visible photo 1 s later); thermal raw pixel -> visible by f35 * diagonal ratio (EXIF 0xA405). Parallax makes the
+  frame approximate at short range. PDF report: own minimal writer pv/pdf.py (Helvetica WinAnsi, DCT images).

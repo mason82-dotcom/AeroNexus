@@ -14,6 +14,7 @@ import io
 import json
 import logging
 import queue
+import re
 import threading
 import time
 import traceback
@@ -21,7 +22,7 @@ import urllib.error
 import urllib.request
 import uuid
 
-from . import analysis, detect, storage
+from . import analysis, detect, pdf, storage
 from .server import HttpError, route, settings
 from .thermal import ThermalError, ThermalParams, Tsdk
 
@@ -80,10 +81,31 @@ def _update(iid: str, **fields) -> dict:
 
 # ------------------------------------------------------------------ media lookup
 
+_DJI_NAME = re.compile(r"^(DJI_)(\d{14})(_\d{4})_T(\.jpe?g)$", re.I)
+
+
+def visible_sibling(thermal_name: str, by_name: dict[str, dict]) -> dict | None:
+    """Visible photo taken with a thermal photo: same index, suffix _V/_W/_Z, time stamp up to 2 s later/earlier
+    (Pilot 2 often stamps the visible photo one second after the thermal one)."""
+    m = _DJI_NAME.match(thermal_name)
+    if not m:
+        return None
+    prefix, stamp, index, ext = m.groups()
+    t0 = time.mktime(time.strptime(stamp, "%Y%m%d%H%M%S"))
+    for dt in (0, 1, -1, 2, -2):
+        ts = time.strftime("%Y%m%d%H%M%S", time.localtime(t0 + dt))
+        for suffix in ("V", "W", "Z"):
+            hit = by_name.get(f"{prefix}{ts}{index}_{suffix}{ext}".upper())
+            if hit:
+                return hit
+    return None
+
+
 def media_files(token: str, file_ids: list[str]) -> list[dict]:
-    """Selected images with object keys, via the mapping service with the caller's token (workspace scope)."""
-    wanted, found, page = set(file_ids), {}, 1
-    while wanted - found.keys():
+    """Selected images with object keys (and their visible sibling photos), via the mapping service with the
+    caller's token (workspace scope)."""
+    wanted, found, by_name, page = set(file_ids), {}, {}, 1
+    while True:
         req = urllib.request.Request(f"{settings.mapping_url}/api/mapping/media?page={page}&page_size=500",
                                      headers={"x-auth-token": token})
         try:
@@ -92,15 +114,17 @@ def media_files(token: str, file_ids: list[str]) -> list[dict]:
         except urllib.error.URLError as exc:
             raise HttpError(502, f"Mapping-Dienst nicht erreichbar: {exc}") from exc
         for row in body["list"]:
+            item = {k: row[k] for k in ("file_id", "file_name", "object_key")}
+            by_name[row["file_name"].upper()] = item
             if row["file_id"] in wanted:
-                found[row["file_id"]] = {k: row[k] for k in ("file_id", "file_name", "object_key")}
+                found[row["file_id"]] = item
         if page * body["page_size"] >= body["total"]:
             break
         page += 1
     missing = wanted - found.keys()
     if missing:
         raise HttpError(422, f"{len(missing)} Bild(er) nicht gefunden")
-    return [found[f] for f in file_ids]
+    return [dict(found[f], visible=visible_sibling(found[f]["file_name"], by_name)) for f in file_ids]
 
 
 def _media_path(file: dict) -> str:
@@ -119,7 +143,13 @@ def process(iid: str) -> None:
     for n, file in enumerate(files, 1):
         try:
             jpeg = storage.read(_media_path(file))
-            info, anomalies = analysis.analyze_image(jpeg, file, converter, tp, dp)
+            visible = None
+            if file.get("visible"):
+                try:
+                    visible = storage.read(_media_path(file["visible"]))
+                except storage.NotFound:
+                    visible = None
+            info, anomalies = analysis.analyze_image(jpeg, file, converter, tp, dp, visible)
             found.extend(anomalies)
         except ThermalError as exc:                       # SDK missing/failing: stop, all images would fail
             _update(iid, status="failed", error=str(exc), finished_at=_now())
@@ -136,10 +166,15 @@ def process(iid: str) -> None:
                 return
     merged = analysis.merge(found, float(meta["params"].get("merge_m", 1.0)))
     for a in merged:
-        crop = a.pop("crop", None)
+        crop, crop_rgb = a.pop("crop", None), a.pop("crop_rgb", None)
         if crop:
             storage.write(_key(iid, f"crops/{a['id']}.png"), crop)
-        a["has_crop"] = bool(crop)
+        if crop_rgb:
+            storage.write(_key(iid, f"crops/{a['id']}_rgb.png"), crop_rgb)
+        a["has_crop"], a["has_crop_rgb"] = bool(crop), bool(crop_rgb)
+    for a in found:                                       # merged-away duplicates: free their crop bytes
+        a.pop("crop", None)
+        a.pop("crop_rgb", None)
     _save(iid, "anomalies.json", merged)
     counts = {str(k): sum(1 for a in merged if a["klass"] == k) for k in (1, 2, 3)}
     _update(iid, status="done", finished_at=_now(), progress=100, images=images,
@@ -343,7 +378,78 @@ Einstrahlung &gt; 600 W/m&sup2; und klarem Himmel.</small></p>
     return doc.encode("utf-8"), "text/html; charset=utf-8", "html"
 
 
-EXPORTS = {"geojson": export_geojson, "csv": export_csv, "report": export_report}
+CLASS_RGB = {1: (0.98, 0.86, 0.08), 2: (0.98, 0.55, 0.09), 3: (0.96, 0.13, 0.18)}
+
+
+def export_pdf(meta: dict, items: list[dict]) -> tuple[bytes, str, str]:
+    """A4 report: summary page, then four anomalies per page with thermal and visible crop."""
+    doc = pdf.Document(meta["name"])
+    doc.new_page()
+    s = meta.get("summary", {})
+    t, d = meta["params"]["thermal"], meta["params"]["detect"]
+    doc.line_text("PV-Inspektion (Thermografie)", 10, rgb=(0.4, 0.4, 0.4), gap=14)
+    doc.line_text(meta["name"], 18, bold=True, gap=10)
+    doc.line_text(f"Erstellt {meta['created_at'].replace('T', ' ').replace('Z', ' UTC')} von "
+                  f"{meta.get('created_by') or ''}, ausgewertet {(meta.get('finished_at') or '').replace('T', ' ').replace('Z', ' UTC')}", 10)
+    doc.line_text(f"Bilder: {s.get('images', 0)} (ausgewertet {s.get('analysed', 0)}), gemeldete Anomalien: {len(items)}",
+                  10, gap=12)
+    for k in (3, 2, 1):
+        n = sum(1 for a in items if a["klass"] == k)
+        doc.rect(50, doc.y - 2, 10, 10, CLASS_RGB[k])
+        doc.line_text(f"Klasse {k} ({CLASS_TEXT[k]}): {n}", 11, x=66)
+    doc.y -= 8
+    doc.line_text("Messbedingungen und Verfahren", 11, bold=True)
+    doc.wrap(f"Temperaturen: DJI Thermal SDK, Emissionsgrad {t['emissivity']}, reflektierte Temperatur "
+             f"{t['reflected_temp']} \u00b0C, Luftfeuchte {t['humidity']} %. Erkennung: Delta-T ab {d['min_delta']} K "
+             f"gegen\u00fcber der Modultemperatur rundum; Klassen ab {d['class1']} / {d['class2']} / {d['class3']} K "
+             "(gebr\u00e4uchliche Praxis zu IEC TS 62446-3). Fehlerart und Fl\u00e4che sind Sch\u00e4tzungen aus der "
+             "Bildgeometrie. Positionen aus GPS, Gimbalwinkeln und H\u00f6he bzw. Laser-Entfernungsmesser "
+             "(Genauigkeit wenige Meter). Das Normalbild ist ein Ausschnitt des gleichzeitig aufgenommenen Fotos; "
+             "der Rahmen ist dort eine N\u00e4herung. Aussagekr\u00e4ftig nur bei Einstrahlung \u00fcber 600 W/m\u00b2, "
+             "klarem Himmel und Anlage unter Last.")
+    missing = pdf.grey_placeholder()
+    per_page, block = 4, 180.0
+    for n, a in enumerate(items):
+        if n % per_page == 0:
+            doc.new_page()
+            doc.line_text(f"{meta['name']} - Anomalien", 10, rgb=(0.4, 0.4, 0.4), gap=8)
+        top = doc.y
+        doc.rect(50, top - block + 14, 4, block - 14, CLASS_RGB[a["klass"]])
+        for i, (key, suffix) in enumerate((("has_crop", ""), ("has_crop_rgb", "_rgb"))):
+            img = None
+            if a.get(key):
+                try:
+                    img = pdf.png_to_jpeg(storage.read(_key(meta["id"], f"crops/{a['id']}{suffix}.png")))
+                except storage.NotFound:
+                    img = None
+            bx = 60 + i * 155
+            doc.image(*(img or missing), bx, top - 155, 150, 150)
+            if img is None:
+                doc.text(bx + 30, top - 82, "kein Normalbild" if i else "kein Bildausschnitt", 9,
+                         rgb=(0.4, 0.4, 0.4))
+        x, y = 375, top - 4
+        lines = [(f"Nr. {a['number']}  Klasse {a['klass']}", 12, True),
+                 (CLASS_TEXT.get(a["klass"], ""), 9, False),
+                 (f"Delta-T {a['delta']:.1f} K", 10, False),
+                 (f"T max {a['t_max']:.1f} \u00b0C, Umgebung {a['t_background']:.1f} \u00b0C", 9, False),
+                 (a["type"] + ("" if a["area_m2"] is None else f", {a['area_m2']:.2f} m\u00b2"), 9, False),
+                 (f"{a['lat']:.7f}, {a['lon']:.7f}" if a["lat"] is not None else "ohne Position (kein GPS)", 9, False),
+                 (f"Bilder: {', '.join(a['seen_in'])[:60]}", 8, False),
+                 (f"Status: {STATUS_TEXT.get(a['status'], a['status'])}", 9, False)]
+        for text, size, bold in lines:
+            doc.text(x, y, text, size, bold)
+            y -= size + 4
+        if a.get("note"):
+            note = a["note"]
+            while note and y > top - 170:
+                doc.text(x, y, note[:40], 8)
+                note, y = note[40:], y - 11
+        doc.y = top - block
+    return doc.save(), "application/pdf", "pdf"
+
+
+STATUS_TEXT = {"open": "offen", "confirmed": "best\u00e4tigt", "dismissed": "verworfen"}
+EXPORTS = {"geojson": export_geojson, "csv": export_csv, "report": export_report, "pdf": export_pdf}
 
 
 @route("GET", "/api/pv/inspections/{iid}/export/{fmt}")

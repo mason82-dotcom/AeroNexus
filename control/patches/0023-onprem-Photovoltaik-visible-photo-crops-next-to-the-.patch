@@ -1,0 +1,114 @@
+From e968c7362383fbc0a509c8d1697bab159f771443 Mon Sep 17 00:00:00 2001
+From: RomaN <mason82.rm@googlemail.com>
+Date: Sat, 3 Oct 2026 02:37:45 +0200
+Subject: [PATCH] onprem: Photovoltaik: visible photo crops next to the thermal
+ ones, PDF report
+
+---
+ src/api/pv.ts                                |  7 ++++---
+ src/locales/de.ts                            |  4 ++++
+ src/pages/page-web/projects/photovoltaik.vue | 15 ++++++++++-----
+ 3 files changed, 18 insertions(+), 8 deletions(-)
+
+diff --git a/src/api/pv.ts b/src/api/pv.ts
+index ee590cd..5b674c6 100644
+--- a/src/api/pv.ts
++++ b/src/api/pv.ts
+@@ -5,7 +5,7 @@ import { authToken } from '/@/api/mapping'
+ import { ELocalStorageKey } from '/@/types/enums'
+ 
+ export type AnomalyStatus = 'open' | 'confirmed' | 'dismissed'
+-export type PvExport = 'report' | 'csv' | 'geojson'
++export type PvExport = 'pdf' | 'report' | 'csv' | 'geojson'
+ 
+ export interface Anomaly {
+   id: string
+@@ -24,6 +24,7 @@ export interface Anomaly {
+   status: AnomalyStatus
+   note: string
+   has_crop: boolean
++  has_crop_rgb?: boolean // crop of the simultaneous visible photo
+ }
+ 
+ export interface InspectionImage {
+@@ -95,8 +96,8 @@ export async function deleteInspection (id: string): Promise<void> {
+ }
+ 
+ // <img>/<a href> cannot send headers: login token as query parameter (never logged by the service)
+-export function cropUrl (id: string, aid: string): string {
+-  return `${pvBase()}/api/pv/inspections/${id}/crops/${aid}.png?token=${encodeURIComponent(authToken())}`
++export function cropUrl (id: string, aid: string, visible = false): string {
++  return `${pvBase()}/api/pv/inspections/${id}/crops/${aid}${visible ? '_rgb' : ''}.png?token=${encodeURIComponent(authToken())}`
+ }
+ 
+ export function exportUrl (id: string, fmt: PvExport): string {
+diff --git a/src/locales/de.ts b/src/locales/de.ts
+index ddfcc0f..816c94d 100644
+--- a/src/locales/de.ts
++++ b/src/locales/de.ts
+@@ -617,4 +617,8 @@ export default {
+   "longest edge": "längste Kante",
+   "photos": "Fotos",
+   "{0} lines": "{0} Bahnen",
++  "Thermal image": "Wärmebild",
++  "Visible photo (frame approximate)": "Normalbild (Rahmen ungefähr)",
++  "PDF report": "PDF-Bericht",
++  "HTML report": "HTML-Bericht",
+ } as Record<string, string>
+diff --git a/src/pages/page-web/projects/photovoltaik.vue b/src/pages/page-web/projects/photovoltaik.vue
+index fcd9f7f..66f60b3 100644
+--- a/src/pages/page-web/projects/photovoltaik.vue
++++ b/src/pages/page-web/projects/photovoltaik.vue
+@@ -61,7 +61,8 @@
+         </div>
+         <div class="exports">
+           <span class="label">{{ $t('Export:') }}</span>
+-          <a :href="exportUrl(current.id, 'report')" target="_blank">{{ $t('Report (print to PDF)') }}</a>
++          <a :href="exportUrl(current.id, 'pdf')">{{ $t('PDF report') }}</a>
++          <a :href="exportUrl(current.id, 'report')" target="_blank">{{ $t('HTML report') }}</a>
+           <a :href="exportUrl(current.id, 'csv')">CSV</a>
+           <a :href="exportUrl(current.id, 'geojson')">GeoJSON</a>
+         </div>
+@@ -73,7 +74,10 @@
+     <a-drawer :visible="!!selected" :title="selected ? $t('Anomaly #{0}', selected.number) : ''" placement="right"
+               width="380" :mask="false" @close="selected = null">
+       <template v-if="selected && current">
+-        <img v-if="selected.has_crop" :src="cropUrl(current.id, selected.id)" class="crop" />
++        <div class="crops">
++          <img v-if="selected.has_crop" :src="cropUrl(current.id, selected.id)" :title="$t('Thermal image')" />
++          <img v-if="selected.has_crop_rgb" :src="cropUrl(current.id, selected.id, true)" :title="$t('Visible photo (frame approximate)')" />
++        </div>
+         <table class="facts">
+           <tr><td>{{ $t('Class') }}</td><td><span class="dot" :style="{ background: CLASS_COLORS[selected.klass] }"></span>
+             {{ selected.klass }} - {{ $t(classText[selected.klass]) }}</td></tr>
+@@ -102,6 +106,7 @@
+                :custom-row="(r) => ({ onClick: () => { tableVisible = false; select(r) } })">
+         <template #crop="{ record }">
+           <img v-if="record.has_crop" :src="cropUrl(current.id, record.id)" class="thumb" />
++          <img v-if="record.has_crop_rgb" :src="cropUrl(current.id, record.id, true)" class="thumb" />
+         </template>
+         <template #klass="{ record }">
+           <span class="dot" :style="{ background: CLASS_COLORS[record.klass] }"></span>{{ record.klass }}
+@@ -206,7 +211,7 @@ const mediaColumns = [
+ ]
+ const tableColumns = [
+   { title: t('No.'), dataIndex: 'number', width: 60, sorter: (a: Anomaly, b: Anomaly) => a.number - b.number },
+-  { title: t('Image'), width: 130, slots: { customRender: 'crop' } },
++  { title: t('Image'), width: 240, slots: { customRender: 'crop' } },
+   { title: t('Class'), width: 70, slots: { customRender: 'klass' }, sorter: (a: Anomaly, b: Anomaly) => a.klass - b.klass },
+   { title: t('Delta-T (K)'), dataIndex: 'delta', width: 80, sorter: (a: Anomaly, b: Anomaly) => a.delta - b.delta },
+   { title: t('T max (deg C)'), dataIndex: 't_max', width: 90 },
+@@ -358,8 +363,8 @@ onUnmounted(() => {
+   &:hover, &.selected { background: #2d3442; } &.dismissed { opacity: 0.5; }
+   .type { color: #aaa; font-size: 12px; margin-left: 6px; } .st { margin-left: 6px; } }
+ .exports { display: flex; gap: 10px; margin-top: 10px; flex-wrap: wrap; .label { color: #888; font-size: 12px; } }
+-.crop { width: 100%; margin-bottom: 10px; image-rendering: pixelated; }
+-.thumb { width: 110px; image-rendering: pixelated; }
++.crops { display: flex; gap: 6px; margin-bottom: 10px; img { width: 50%; min-width: 0; } }
++.thumb { width: 110px; margin-right: 4px; }
+ .facts { width: 100%; font-size: 13px; td { padding: 3px 4px; vertical-align: top; } td:first-child { color: #888; width: 110px; } }
+ .status { margin: 10px 0; }
+ .save { margin-top: 6px; }
+-- 
+2.47.3
+

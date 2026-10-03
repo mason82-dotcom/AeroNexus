@@ -146,6 +146,27 @@ class InspectionFlowTest(unittest.TestCase):
         self.assertIn(b"Klasse 3", data)
         self.assertIn(b"Zelle gebrochen", data)
 
+    def test_pdf_report(self):
+        iid = self.run_inspection()
+        a = inspections.get_inspection(Request(), USER, iid)["anomalies"]
+        inspections.set_status(Request({"note": "Zelle (gebrochen) \\ Gr\u00f6\u00dfe"}), USER, iid, a[0]["id"])
+        _, data, ctype, headers = inspections.export(Request(), USER, iid, "pdf")
+        self.assertEqual(ctype, "application/pdf")
+        self.assertIn('attachment; filename="Testanlage.pdf"', headers["Content-Disposition"])
+        self.assertTrue(data.startswith(b"%PDF-1.4"))
+        self.assertTrue(data.rstrip().endswith(b"%%EOF"))
+        # every xref offset points at its "n 0 obj"
+        start = int(data[data.rindex(b"startxref") + 9:].split()[0])
+        lines = data[start:].split(b"\n")
+        count = int(lines[1].split()[1])
+        for i in range(1, count):
+            off = int(lines[2 + i].split()[0])
+            self.assertTrue(data[off:].startswith(b"%d 0 obj" % i), i)
+        self.assertEqual(data.count(b"/Type /Page "), 2)               # summary + one page of anomalies
+        self.assertGreaterEqual(data.count(b"/Subtype /Image"), 4)       # 2 anomalies x (thermal + placeholder)
+        self.assertIn("Gr\u00f6\u00dfe".encode("cp1252"), data)          # WinAnsi umlauts
+        self.assertIn(b"\\(gebrochen\\)", data)                         # escaped parentheses
+
     def test_other_workspace(self):
         iid = self.run_inspection()
         for call in (lambda: inspections.get_inspection(Request(), OTHER, iid),
