@@ -113,6 +113,10 @@ Editing routes (mapping-tool/service/app/wpml.py, verified with Pilot 2 on RC Pr
   from edge/data/basemaps, served by the control nginx (`/basemaps/`, range requests; nginx.conf and Dockerfile
   are copied into the build dir by setup.sh, re-run it after changing them). File made by
   `mapping-tool/basemaps/fetch-basemap.sh` (go-pmtiles extract of the daily Protomaps build, maxzoom 15).
+- Offline aerial images (web patch 0025, pmtiles 3.2.1 leafletRasterLayer): `MAP_ORTHO_PMTILES_URL`, made by
+  `mapping-tool/basemaps/fetch-orthophoto.sh` from the LGL BW WMTS (DOP20, open data dl-de/by-2-0, attribution
+  "LGL-BW (<year>) dl-de/by-2-0" is mandatory). Tile matrix ids are "GoogleMapsCompatible:<z>". Download is
+  resumable (MBTiles in edge/data/basemaps/.cache), failed tiles get two slow retry passes, then -> PMTiles.
 - MinIO CE: no images/binaries published anymore -> built from pinned source in `evidence/docker/minio`
   (minio RELEASE.2025-10-15T17-29-55Z, mc RELEASE.2025-08-13T08-35-41Z). No further security fixes;
   LAN only. Phase 2: evaluate STS-capable replacement.

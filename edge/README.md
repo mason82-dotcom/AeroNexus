@@ -107,6 +107,16 @@ Die Ebenen „Karte (online)“ und „Satellit (online)“ bleiben im Ebenen-Sc
 - Außerhalb der Region bleibt die Offline-Karte leer: dort auf „Karte (online)“ umschalten.
 - Die Kartendatei ist nicht in der Datensicherung (jederzeit neu ladbar).
 
+**Offline-Luftbild:** Ebene „Luftbild (offline)“ mit den Orthofotos des Landesamts (LGL Baden-Württemberg, DOP20,
+ca. 30 cm/Pixel bis Zoom 19), Lizenz „Datenlizenz Deutschland – Namensnennung – 2.0“, Quellenvermerk
+„LGL-BW (Jahr) dl-de/by-2-0“ (wird in der Karte angezeigt). Außerhalb des geladenen Gebiets ist darunter die
+Offline-Vektorkarte zu sehen.
+- Laden: `mapping-tool/basemaps/fetch-orthophoto.sh [Name] [Radius km | regions/x.geojson]`
+  (Standard: `luftbild-home`, 5 km um `HOME_POINT` = ca. 43.000 Kacheln, 470 MB, ca. 75 min)
+- Unterbrochen? Denselben Befehl erneut starten, der Download setzt fort.
+- Anzeige: `MAP_ORTHO_PMTILES_URL=/basemaps/<Name>.pmtiles` in `edge/.env`, dann `docker compose up -d --build control`.
+- Faustregel Größe: 10 km Radius ≈ 170.000 Kacheln, 2,1 GB (rücksichtsvoll laden, 4 parallele Abrufe).
+
 Der öffentliche OSM-Kachelserver (Ebene „Karte (online)“) ist für gelegentliche private Nutzung gedacht.
 
 ## Livestream

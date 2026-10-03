@@ -68,6 +68,7 @@ Bisherige Patches:
 - **control 0022:** Flugplanung: neue Flächenroute aus einer Pilot-Vorlage (Zweck, Bodenauflösung, Vorschau der Bahnen)
 - **control 0023:** Photovoltaik: Normalbild-Ausschnitt neben dem Wärmebild, PDF-Bericht
 - **control 0024:** Kopierte und geplante Routen enthalten ihre berechnete Flugbahn (Pilot 2 fliegt die mitgelieferte Bahn unverändert)
+- **control 0025:** Offline-Luftbild (Orthofotos LGL BW DOP20, Open Data) als Kartenebene
 
 Prüfen, ob die Patches vollständig sind und sauber auf die gepinnten Commits passen: `edge/verify-patches.sh`
 

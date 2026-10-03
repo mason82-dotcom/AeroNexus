@@ -1,0 +1,77 @@
+From fef0fb176a4b4155df5d417f118ab19a8906295c Mon Sep 17 00:00:00 2001
+From: RomaN <mason82.rm@googlemail.com>
+Date: Sat, 3 Oct 2026 03:53:04 +0200
+Subject: [PATCH] onprem: offline aerial image layer (LGL BW DOP20 as raster
+ PMTiles)
+
+---
+ package.json                     |  1 +
+ src/vendors/amap-leaflet-shim.ts | 12 ++++++++++++
+ yarn.lock                        |  2 +-
+ 3 files changed, 14 insertions(+), 1 deletion(-)
+
+diff --git a/package.json b/package.json
+index 07492e5..135c02c 100644
+--- a/package.json
++++ b/package.json
+@@ -20,6 +20,7 @@
+     "leaflet": "1.9.4",
+     "mitt": "^3.0.0",
+     "mqtt": "^4.3.7",
++    "pmtiles": "3.2.1",
+     "protomaps-leaflet": "5.1.0",
+     "query-string": "^7.0.1",
+     "reconnecting-websocket": "^4.4.0",
+diff --git a/src/vendors/amap-leaflet-shim.ts b/src/vendors/amap-leaflet-shim.ts
+index 73f1268..a288440 100644
+--- a/src/vendors/amap-leaflet-shim.ts
++++ b/src/vendors/amap-leaflet-shim.ts
+@@ -9,6 +9,7 @@
+ import L from 'leaflet'
+ import 'leaflet/dist/leaflet.css'
+ import { leafletLayer } from 'protomaps-leaflet'
++import { PMTiles, leafletRasterLayer } from 'pmtiles'
+ 
+ type Coord = LngLat | [number, number] | { lng: number, lat: number }
+ 
+@@ -256,6 +257,9 @@ const TILE_ATTR = (import.meta.env.VITE_MAP_TILE_ATTRIBUTION as string) || '&cop
+ const SAT_URL = 'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}'
+ // onprem: offline vector basemap (PMTiles from mapping-tool/basemaps/fetch-basemap.sh, served by the web nginx)
+ const PMTILES_URL = (import.meta.env.VITE_MAP_PMTILES_URL as string) || ''
++// onprem: offline orthophotos (LGL BW DOP20 open data, mapping-tool/basemaps/fetch-orthophoto.sh)
++const ORTHO_URL = (import.meta.env.VITE_MAP_ORTHO_PMTILES_URL as string) || ''
++const ORTHO_ATTR = 'Luftbild: LGL-BW (' + new Date().getFullYear() + ') <a href="https://www.govdata.de/dl-de/by-2-0">dl-de/by-2-0</a>'
+ const PMTILES_ATTR = '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>, <a href="https://protomaps.com">Protomaps</a>'
+ 
+ export class Map {
+@@ -284,6 +288,14 @@ export class Map {
+     } else {
+       street.addTo(this.leaflet)
+     }
++    if (ORTHO_URL) {
++      // aerial images of the downloaded area; outside it the offline vector map shows through
++      const ortho = leafletRasterLayer(new PMTiles(ORTHO_URL), { maxNativeZoom: 19, maxZoom: 20, attribution: ORTHO_ATTR }) as L.Layer
++      const below = PMTILES_URL
++        ? leafletLayer({ url: PMTILES_URL, flavor: 'light', lang: 'de', maxDataZoom: 15, attribution: PMTILES_ATTR }) as unknown as L.Layer
++        : null
++      bases['Luftbild (offline)'] = L.layerGroup(below ? [below, ortho] : [ortho])
++    }
+     bases[PMTILES_URL ? 'Karte (online)' : 'Karte'] = street
+     bases[PMTILES_URL ? 'Satellit (online)' : 'Satellit'] = sat
+     L.control.layers(bases, {}, { position: 'topright' }).addTo(this.leaflet)
+diff --git a/yarn.lock b/yarn.lock
+index 8f2b076..def16af 100644
+--- a/yarn.lock
++++ b/yarn.lock
+@@ -3113,7 +3113,7 @@ picomatch@^2.0.4, picomatch@^2.2.1, picomatch@^2.2.2, picomatch@^2.2.3:
+   resolved "https://registry.yarnpkg.com/picomatch/-/picomatch-2.3.1.tgz"
+   integrity sha512-JU3teHTNjmE2VCGFzuY8EXzCDVwEqB2a8fsIvwaStHhAWJEeVd1o1QD80CU6+ZdEXXSLbSsuLwJjkCBWqRQUVA==
+ 
+-pmtiles@^3.1.0:
++pmtiles@3.2.1, pmtiles@^3.1.0:
+   version "3.2.1"
+   resolved "https://registry.yarnpkg.com/pmtiles/-/pmtiles-3.2.1.tgz#0ef79982ccf6052eeb9301ce7d161996c0b193de"
+   integrity sha512-3R4fBwwoli5mw7a6t1IGwOtfmcSAODq6Okz0zkXhS1zi9sz1ssjjIfslwPvcWw5TNhdjNBUg9fgfPLeqZlH6ng==
+-- 
+2.47.3
+

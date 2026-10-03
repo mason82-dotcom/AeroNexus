@@ -16,5 +16,6 @@ Test ohne Rechenknoten: `python3 mapping-tool/service/tools/sim_agent.py`
 
 Offline-Basiskarte: `basemaps/fetch-basemap.sh` (Protomaps-Vektorkarte als PMTiles, Region per GeoJSON;
 Details in edge/README.md, Abschnitt Karte).
+Offline-Luftbild: `basemaps/fetch-orthophoto.sh` (LGL BW DOP20 Open Data, Kreis um HOME_POINT oder GeoJSON).
 
 Geplant: Messwerkzeuge, WPML-Flugplanung.
