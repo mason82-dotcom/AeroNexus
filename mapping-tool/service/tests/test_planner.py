@@ -89,6 +89,78 @@ class GeometryTest(unittest.TestCase):
         self.assertGreater(max(lengths), 3 * min(lengths))
 
 
+def shape(points_m):
+    """Polygon from local metres (east, north) relative to the test site."""
+    k = math.cos(math.radians(LAT))
+    return [[LON + x / (planner.M_PER_DEG * k), LAT + y / planner.M_PER_DEG] for x, y in points_m]
+
+
+def inside(poly, p, eps=0.05):
+    """Point in polygon (local metres), points on the edge count as inside (eps in m)."""
+    xy, _ = planner._local(poly)
+    k = math.cos(math.radians(sum(q[1] for q in poly) / len(poly)))
+    lon0 = sum(q[0] for q in poly) / len(poly)
+    lat0 = sum(q[1] for q in poly) / len(poly)
+    x, y = (p[0] - lon0) * planner.M_PER_DEG * k, (p[1] - lat0) * planner.M_PER_DEG
+    hit = False
+    for i in range(len(xy)):
+        (x1, y1), (x2, y2) = xy[i], xy[(i + 1) % len(xy)]
+        # on the edge?
+        dx, dy = x2 - x1, y2 - y1
+        t = max(0.0, min(1.0, ((x - x1) * dx + (y - y1) * dy) / (dx * dx + dy * dy)))
+        if math.hypot(x1 + t * dx - x, y1 + t * dy - y) < eps:
+            return True
+        if (y1 > y) != (y2 > y) and x < x1 + (y - y1) * dx / dy:
+            hit = not hit
+    return hit
+
+
+U_SHAPE = shape([(0, 0), (300, 0), (300, 200), (200, 200), (200, 80), (100, 80), (100, 200), (0, 200)])
+L_SHAPE = shape([(0, 0), (300, 0), (300, 80), (100, 80), (100, 250), (0, 250)])
+
+
+class ConcaveAreaTest(unittest.TestCase):
+    def check_inside(self, poly, lines):
+        for seg in lines:
+            for t in (0.0, 0.25, 0.5, 0.75, 1.0):
+                p = [seg[0][0] + t * (seg[1][0] - seg[0][0]), seg[0][1] + t * (seg[1][1] - seg[0][1])]
+                self.assertTrue(inside(poly, p), f"lane point outside the area: {p}")
+
+    def test_u_shape_lanes_stay_inside(self):
+        lines = planner.flight_lines(U_SHAPE, 90, 20)                 # east-west lanes across the notch
+        self.check_inside(U_SHAPE, lines)
+        # 200 m / 20 m = 10 sweep lines; the 6 above y=80 have two parts each -> 4 + 2 * 6 = 16 lanes
+        self.assertEqual(len(lines), 16)
+
+    def test_u_shape_cells_are_flown_one_after_another(self):
+        lines = planner.flight_lines(U_SHAPE, 90, 20)
+        k = math.cos(math.radians(LAT))
+
+        def region(seg):
+            x = ((seg[0][0] + seg[1][0]) / 2 - LON) * planner.M_PER_DEG * k
+            y = (seg[0][1] - LAT) * planner.M_PER_DEG
+            return "base" if y < 80 else ("left" if x < 100 else "right")
+        labels = [region(seg) for seg in lines]
+        runs = [lab for i, lab in enumerate(labels) if i == 0 or lab != labels[i - 1]]
+        self.assertEqual(sorted(runs), ["base", "left", "right"])       # every cell flown in one go
+        self.assertEqual(labels.count("left"), 6)
+        self.assertEqual(labels.count("right"), 6)
+
+    def test_l_shape_and_other_direction(self):
+        for direction in (0, 90, 30, 135):
+            with self.subTest(direction=direction):
+                lines = planner.flight_lines(L_SHAPE, direction, 15)
+                self.check_inside(L_SHAPE, lines)
+                total = sum(planner._seg_len(s) for s in lines)
+                # lane length * spacing ~ area (300*80 + 100*170 = 41,000 m2)
+                self.assertAlmostEqual(total * 15 / 41000, 1.0, delta=0.12)
+
+    def test_convex_area_unchanged(self):
+        lines = planner.flight_lines(rect(200, 100), 90, 20)
+        self.assertEqual(len(lines), 5)
+        self.check_inside(rect(200, 100), lines)
+
+
 class PreviewTest(unittest.TestCase):
     def test_pv_preview(self):
         ln = planner.lens("1-67-0", "thermal")

@@ -132,9 +132,26 @@ def longest_edge_direction(poly: list[list[float]]) -> int:
     return int(round(az)) % 180
 
 
+def _intervals(hits: list[float], margin: float) -> list[tuple[float, float]]:
+    """Inside parts of one sweep line (pairs of sorted edge crossings), widened by the margin and merged."""
+    out: list[list[float]] = []
+    for i in range(0, len(hits) - 1, 2):
+        a, b = hits[i] - margin, hits[i + 1] + margin
+        if out and a <= out[-1][1]:
+            out[-1][1] = max(out[-1][1], b)
+        else:
+            out.append([a, b])
+    return [(a, b) for a, b in out]
+
+
 def flight_lines(poly: list[list[float]], direction: float, spacing: float, margin: float = 0.0):
-    """Lawnmower lines along `direction` (azimuth), `spacing` m apart, clipped to the polygon.
-    Returns [[lon, lat], [lon, lat]] segments in flying order (alternating)."""
+    """Lawnmower lanes along `direction` (azimuth), `spacing` m apart, inside the polygon.
+    Returns [[lon, lat], [lon, lat]] segments in flying order.
+
+    Concave areas (U, L shapes) are split into cells where every sweep line has exactly one inside part
+    (boustrophedon decomposition); each cell is flown as its own lawnmower, cells one after another, so no lane
+    crosses a gap outside the area. Only the short transitions between cells do.
+    """
     if spacing <= 0.5:
         raise PlanError("Linienabstand zu klein")
     xy, to_ll = _local(poly)
@@ -147,7 +164,10 @@ def flight_lines(poly: list[list[float]], direction: float, spacing: float, marg
     vmin, vmax = min(p[1] for p in pts) - margin, max(p[1] for p in pts) + margin
     n_lines = max(1, int(math.ceil((vmax - vmin) / spacing - 1e-6)))     # tolerance: 100 m / 20 m = 5 lines
     first = vmin + ((vmax - vmin) - (n_lines - 1) * spacing) / 2
-    segments = []
+
+    # cells: consecutive sweep lines with the same number of inside parts that overlap pairwise
+    cells: list[list[tuple[float, float, float]]] = []       # each cell: [(v, u0, u1), ...]
+    active: list[int] = []
     for i in range(n_lines):
         v = first + i * spacing
         hits = []
@@ -156,12 +176,37 @@ def flight_lines(poly: list[list[float]], direction: float, spacing: float, marg
             if (v1 <= v < v2) or (v2 <= v < v1):
                 hits.append(u1 + (v - v1) * (u2 - u1) / (v2 - v1))
         hits.sort()
-        if len(hits) < 2:
-            continue
-        u0, u1 = hits[0] - margin, hits[-1] + margin       # outer extent (Pilot also flies across concave gaps)
-        if len(segments) % 2:
-            u0, u1 = u1, u0
-        segments.append([to_ll(*back(u0, v)), to_ll(*back(u1, v))])
+        parts = _intervals(hits, margin)
+        prev = [cells[c][-1] for c in active]
+        same = len(parts) == len(prev) and all(p0 < q1 and q0 < p1 for (p0, p1), (_, q0, q1) in zip(parts, prev))
+        if same:
+            for c, (u0, u1) in zip(active, parts):
+                cells[c].append((v, u0, u1))
+        else:
+            active = []
+            for u0, u1 in parts:
+                cells.append([(v, u0, u1)])
+                active.append(len(cells) - 1)
+
+    segments, pos = [], None
+    for cell in cells:
+        lanes = [(back(u0, v), back(u1, v)) for v, u0, u1 in cell]
+        # enter the cell at the lane end nearest to where the previous cell ended
+        if pos is not None:
+            d = lambda p: math.hypot(p[0] - pos[0], p[1] - pos[1])      # noqa: E731
+            options = {"fwd": d(lanes[0][0]), "fwd_rev": d(lanes[0][1]),
+                       "bwd": d(lanes[-1][0]), "bwd_rev": d(lanes[-1][1])}
+            best = min(options, key=options.get)
+            if best.startswith("bwd"):
+                lanes.reverse()
+            flip_first = best.endswith("rev")
+        else:
+            flip_first = False
+        for k, (p, q) in enumerate(lanes):
+            if (k % 2 == 1) != flip_first:
+                p, q = q, p
+            segments.append([to_ll(*p), to_ll(*q)])
+            pos = q
     return segments
 
 
