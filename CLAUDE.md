@@ -71,12 +71,16 @@ New device = DeviceTypeEnum + DeviceEnum (+ GatewayTypeEnum if it is a gateway/R
 0 waypoint, 1 mapping2d, 2 mapping3d, 3 mappingStrip, 4 mappingPrism, 5 mappingCylinder.
 4/5 are not in the public WPML docs; verified 2026-10-01 against KMZ files synced by Pilot 2 (patch api 0006).
 Editing routes (mapping-tool/service/app/wpml.py, verified with Pilot 2 on RC Pro 2026-10-02):
-- Pilot 2 rejects a KMZ without waylines.wpml ("route file deleted"). For mapping2d it recomputes the
-  route from template.kml, so the original waylines.wpml is kept as placeholder.
+- Pilot 2 rejects a KMZ without waylines.wpml ("route file deleted").
+- WRONG earlier assumption, corrected 2026-10-03: Pilot 2 does NOT recompute a synced mapping2d route. It shows
+  area/parameters from template.kml but uses waylines.wpml (the executable path) as it is. A copy that keeps
+  the template's waylines.wpml would FLY THE OLD PATH (old area, direction, height). Proven: planned route with
+  direction 30 / height 75 had the byte-identical waylines.wpml of template "Home" (lanes 178 deg, 50 m) and
+  Pilot showed exactly those lanes. Pilot only downloads cloud routes; saving in Pilot uploads nothing back.
 - Never re-serialize template.kml (ElementTree): Pilot 2 then read the polygon lat/lon swapped (route
   in Somalia). Edit values as text only, keep declaration, indentation and number style.
-- Height change of a web-edited copy (globalShootHeight/height/surfaceRelativeHeight, ellipsoidHeight shifted)
-  accepted by Pilot 2 on RC Pro (verified 2026-10-03).
+- Height change of a web-edited copy: Pilot shows the new value from template.kml, but the executable path in
+  waylines.wpml keeps the template height (see above). Not flight-safe until waylines.wpml is regenerated.
 - Flight planning (app/planner.py, web patch 0022): a new area route = edit_copy of a Pilot 2 mapping2d template
   of the same drone/camera (never build template.kml from scratch). Camera table per payload type (66/67/68/88/89)
   with GSD factors from DJI specs; presets pv_thermal / multispectral / ortho; imageFormat only for thermal cameras.
