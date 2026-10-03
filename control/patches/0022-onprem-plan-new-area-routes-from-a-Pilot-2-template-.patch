@@ -1,4 +1,4 @@
-From 7c946268225af6e1b631e536694e42ca42d2f543 Mon Sep 17 00:00:00 2001
+From 44ff25e863db8bd35e0e686bafc66fbb7655dd4f Mon Sep 17 00:00:00 2001
 From: RomaN <mason82.rm@googlemail.com>
 Date: Sat, 3 Oct 2026 02:22:12 +0200
 Subject: [PATCH] onprem: plan new area routes from a Pilot 2 template (purpose
@@ -99,7 +99,7 @@ index f2844ec..f7c3146 100644
        <a @click="close"><CloseOutlined /></a>
 diff --git a/src/components/wayline/RoutePlanner.vue b/src/components/wayline/RoutePlanner.vue
 new file mode 100644
-index 0000000..0417c9c
+index 0000000..ac85854
 --- /dev/null
 +++ b/src/components/wayline/RoutePlanner.vue
 @@ -0,0 +1,236 @@
@@ -181,7 +181,7 @@ index 0000000..0417c9c
 +
 +<script lang="ts" setup>
 +import { t } from '/@/locales'
-+import { computed, defineEmits, reactive, ref, watch } from 'vue'
++import { computed, defineEmits, defineExpose, reactive, ref, watch } from 'vue'
 +import { message } from 'ant-design-vue'
 +import { CloseOutlined } from '@ant-design/icons-vue'
 +import { PlanInfo, PlanLens, PlanPreviewResult, copyRoute, planPreview } from '/@/api/mapping'
