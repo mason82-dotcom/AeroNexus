@@ -149,7 +149,7 @@ Editing routes (mapping-tool/service/app/wpml.py, verified with Pilot 2 on RC Pr
 - Host ports on the dev Pi: MQTT 1884, MQTT-WS 8084, web 8085 (1883/8083/8080 taken by other services).
 
 ## Mission planning
-- Menu "Aufgabenpläne" = missions (web patch 0027, missions.vue); the DJI Dock task page (task.vue) is unused.
+- Menu "Aufgabenplaene" (task plans) = missions (web patch 0027, missions.vue); the DJI Dock task page (task.vue) is unused.
   Backend in the mapping service (app/missions.py, migration 0004): checklist per purpose, status planned ->
   ready (auto when all ticked) -> flown -> evaluated / cancelled. RC page shows today's missions of the pilot
   (`?mine=true`, local day window). Remote start is Dock-only, so nothing is pushed to Pilot 2 besides the routes.
