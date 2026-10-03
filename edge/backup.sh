@@ -18,7 +18,10 @@ DATABASES="cloud_sample mapping"
 
 if [ "${1:-}" = "--install-cron" ]; then
   line="15 3 * * * $EDGE/backup.sh >> $BACKUP_DIR/backup.log 2>&1"
-  ( crontab -l 2>/dev/null | grep -vF "$EDGE/backup.sh"; echo "$line" ) | crontab -
+  # keep all other entries; an empty crontab or no match must not abort (set -e + pipefail)
+  { crontab -l 2>/dev/null || true; } | { grep -vF "$EDGE/backup.sh" || true; } > "$BACKUP_DIR/.crontab.new"
+  echo "$line" >> "$BACKUP_DIR/.crontab.new"
+  crontab "$BACKUP_DIR/.crontab.new" && rm -f "$BACKUP_DIR/.crontab.new"
   echo "cron installed: $line"; exit 0
 fi
 
