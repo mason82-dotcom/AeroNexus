@@ -38,6 +38,6 @@ jobs:
           sed -i -e 's/^DJI_APP_ID=.*/DJI_APP_ID=123456/' -e 's/^DJI_APP_KEY=.*/DJI_APP_KEY=ci/' \
                  -e 's/^DJI_APP_LICENSE=.*/DJI_APP_LICENSE=ci/' .env
           ./setup.sh
-      - name: Build images (backend incl. Java compile, web incl. ESLint, mapping, farming, pv)
+      - name: Build images (backend incl. Java compile, web incl. ESLint, mapping, farming, pv, tsdk)
         working-directory: edge
-        run: docker compose build api control mapping farming pv
+        run: docker compose build api control mapping farming pv tsdk
