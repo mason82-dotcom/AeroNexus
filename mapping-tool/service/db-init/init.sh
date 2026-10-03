@@ -13,6 +13,9 @@ ALTER USER 'mapping'@'%' IDENTIFIED BY '${MAPPING_DB_PASSWORD}';
 GRANT ALL PRIVILEGES ON \`mapping\`.* TO 'mapping'@'%';
 GRANT SELECT ON \`cloud_sample\`.\`media_file\` TO 'mapping'@'%';
 GRANT SELECT ON \`cloud_sample\`.\`wayline_file\` TO 'mapping'@'%';
+-- missions: drones of the workspace and the user names (never the password column)
+GRANT SELECT ON \`cloud_sample\`.\`manage_device\` TO 'mapping'@'%';
+GRANT SELECT (user_id, username, user_type, workspace_id) ON \`cloud_sample\`.\`manage_user\` TO 'mapping'@'%';
 FLUSH PRIVILEGES;
 SQL
 echo "mapping-db-init done"

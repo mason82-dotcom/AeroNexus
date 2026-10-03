@@ -6,7 +6,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from . import config, db, mediaauth
+from . import config, db, mediaauth, missions
 from .api import build_router
 from .storage import Storage
 
@@ -42,13 +42,14 @@ app = FastAPI(title="AeroNexus Mapping", version="0.1.0", lifespan=lifespan)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[settings.web_origin],
-    allow_methods=["GET", "POST", "DELETE"],
+    allow_methods=["GET", "POST", "PUT", "DELETE"],
     allow_headers=["x-auth-token", "content-type", "authorization"],
 )
 
 
 app.include_router(build_router(settings, storage))
 app.include_router(mediaauth.build_router(settings))
+app.include_router(missions.build_router(settings))
 
 
 @app.get("/health")
