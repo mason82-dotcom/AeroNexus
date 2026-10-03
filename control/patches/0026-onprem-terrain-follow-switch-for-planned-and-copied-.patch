@@ -1,0 +1,118 @@
+From 9983cff73924e514766878a8be501c29894200f9 Mon Sep 17 00:00:00 2001
+From: RomaN <mason82.rm@googlemail.com>
+Date: Sat, 3 Oct 2026 04:38:56 +0200
+Subject: [PATCH] onprem: terrain follow switch for planned and copied area
+ routes
+
+---
+ src/api/mapping.ts                      | 1 +
+ src/components/wayline/RouteEditor.vue  | 7 ++++++-
+ src/components/wayline/RoutePlanner.vue | 8 ++++++--
+ src/locales/de.ts                       | 2 ++
+ 4 files changed, 15 insertions(+), 3 deletions(-)
+
+diff --git a/src/api/mapping.ts b/src/api/mapping.ts
+index b2eb30c..a90bb08 100644
+--- a/src/api/mapping.ts
++++ b/src/api/mapping.ts
+@@ -147,6 +147,7 @@ export interface RouteParams {
+   speed: number
+   image_format?: string | null // thermal cameras: "visable", "ir", "visable,ir"
+   lens?: PlanLens | null // camera that sets lane and photo spacing (default: first camera of the template)
++  terrain_follow?: boolean // DJI real-time terrain follow: height above ground instead of above take-off
+ }
+ 
+ export interface PlanPreset {
+diff --git a/src/components/wayline/RouteEditor.vue b/src/components/wayline/RouteEditor.vue
+index b261d09..35afa4d 100644
+--- a/src/components/wayline/RouteEditor.vue
++++ b/src/components/wayline/RouteEditor.vue
+@@ -49,6 +49,9 @@
+         <a-form-item :label="$t('Speed (m/s)')">
+           <a-input-number v-model:value="form.speed" size="small" :min="1" :max="15" :step="0.5" />
+         </a-form-item>
++        <a-form-item :label="$t('Terrain follow')" :title="$t('Real-time terrain follow with the drone sensors: the height is kept above the ground below instead of above the take-off point')">
++          <a-switch v-model:checked="form.terrain_follow" size="small" />
++        </a-form-item>
+       </a-form>
+       <div class="hint warn">{{ $t('Check the copy in Pilot 2 before flying.') }}</div>
+       <div class="buttons">
+@@ -72,7 +75,7 @@ const emit = defineEmits<{ (e: 'saved'): void }>()
+ const { clear, startEdit, cancelEdit } = useRouteOverlay()
+ const saving = ref(false)
+ const p = computed(() => routeState.route!.params)
+-const form = reactive({ name: '', height: 0, direction: 0, margin: 0, overlap_h: 80, overlap_w: 80, speed: 10 })
++const form = reactive({ name: '', height: 0, direction: 0, margin: 0, overlap_h: 80, overlap_w: 80, speed: 10, terrain_follow: false })
+ 
+ function fmt (v: number | null): string {
+   return v === null || v === undefined ? '-' : String(Math.round(v * 10) / 10)
+@@ -88,6 +91,7 @@ function beginEdit () {
+     overlap_h: Math.round(r.params.overlap_h ?? 80),
+     overlap_w: Math.round(r.params.overlap_w ?? 80),
+     speed: r.params.speed ?? 10,
++    terrain_follow: !!r.params.surface_follow,
+   })
+   startEdit()
+ }
+@@ -114,6 +118,7 @@ async function save () {
+         overlap_h: form.overlap_h,
+         overlap_w: form.overlap_w,
+         speed: form.speed,
++        terrain_follow: form.terrain_follow,
+       },
+     })
+     message.success(t('Saved as new route "{0}". Pilot 2 syncs it into its library.', result.name))
+diff --git a/src/components/wayline/RoutePlanner.vue b/src/components/wayline/RoutePlanner.vue
+index de202a2..491f3d3 100644
+--- a/src/components/wayline/RoutePlanner.vue
++++ b/src/components/wayline/RoutePlanner.vue
+@@ -48,6 +48,9 @@
+       <a-form-item :label="$t('Margin (m)')">
+         <a-input-number v-model:value="form.margin" size="small" :min="0" :max="200" :step="1" />
+       </a-form-item>
++      <a-form-item :label="$t('Terrain follow')" :title="$t('Real-time terrain follow with the drone sensors: the height is kept above the ground below instead of above the take-off point')">
++        <a-switch v-model:checked="form.terrain_follow" size="small" />
++      </a-form-item>
+       <a-form-item v-if="info.image_formats.length" :label="$t('Photos')">
+         <a-select v-model:value="form.image_format" size="small">
+           <a-select-option value="visable,ir">{{ $t('Wide + thermal') }}</a-select-option>
+@@ -91,7 +94,7 @@ const previewError = ref('')
+ const saving = ref(false)
+ const form = reactive({
+   name: '', preset: 'custom', lens: 'wide' as PlanLens, gsd: 2, height: 60, overlap_h: 80, overlap_w: 70,
+-  direction: 0, speed: 8, margin: 0, image_format: null as string | null,
++  direction: 0, speed: 8, margin: 0, image_format: null as string | null, terrain_follow: false,
+ })
+ 
+ const lensFactor = computed(() => (info.value?.lenses.find(l => l.key === form.lens)?.gsd_cm_per_10m ?? 0.27) / 10)
+@@ -145,7 +148,7 @@ function open (plan: PlanInfo) {
+   const stamp = new Date().toISOString().slice(0, 10)
+   Object.assign(form, {
+     name: `Plan ${stamp}`, preset: Object.keys(plan.presets)[0] || 'custom', margin: 0,
+-    image_format: plan.image_format, direction: 0,
++    image_format: plan.image_format, direction: 0, terrain_follow: !!(plan.params as any).surface_follow,
+   })
+   startPlan({
+     id: plan.id, name: plan.name, drone_model_key: '', template_type: 'mapping2d', editable: true, polygon: poly,
+@@ -195,6 +198,7 @@ async function save () {
+         height: form.height, direction: form.direction % 360, margin: form.margin, overlap_h: form.overlap_h,
+         overlap_w: form.overlap_w, speed: form.speed, image_format: info.value!.image_formats.length ? form.image_format : null,
+         lens: form.lens,
++        terrain_follow: form.terrain_follow,
+       },
+     })
+     message.success(t('Saved as new route "{0}". Pilot 2 syncs it into its library.', result.name) +
+diff --git a/src/locales/de.ts b/src/locales/de.ts
+index 09ebc68..77075f2 100644
+--- a/src/locales/de.ts
++++ b/src/locales/de.ts
+@@ -624,4 +624,6 @@ export default {
+   "Drag the corners onto the area, click a small dot to add a corner, right-click a corner to delete it. The orange line is the flight path that is saved with the route.": "Ecken auf die Fläche ziehen, kleiner Punkt fügt eine Ecke hinzu, Rechtsklick löscht eine Ecke. Die orange Linie ist die Flugbahn, die mit der Route gespeichert wird.",
+   "Drag corners to move them, click a small dot to add a corner, right-click a corner to delete it. The grey line is the old flight path: when saving, AeroNexus computes the new path from area, height, overlap and direction.": "Ecken ziehen zum Verschieben, auf einen kleinen Punkt klicken fügt eine Ecke hinzu, Rechtsklick auf eine Ecke löscht sie. Die graue Linie ist die alte Flugbahn: Beim Speichern berechnet AeroNexus die neue Bahn aus Fläche, Höhe, Überlappung und Richtung.",
+   "{0} lanes, {1} min, photo every {2} s.": "{0} Bahnen, {1} min, Foto alle {2} s.",
++  "Terrain follow": "Geländefolge",
++  "Real-time terrain follow with the drone sensors: the height is kept above the ground below instead of above the take-off point": "Echtzeit-Geländefolge mit den Sensoren der Drohne: Die Höhe gilt über dem Boden darunter statt über dem Startpunkt",
+ } as Record<string, string>
+-- 
+2.47.3
+

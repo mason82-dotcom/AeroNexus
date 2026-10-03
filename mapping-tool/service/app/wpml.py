@@ -150,6 +150,7 @@ def _replace_if_changed(text: str, prefix: str, name: str, old: float | None, va
 MIN_SHOT_INTERVAL = 1.5          # s, timed shots faster than this are not reliable on M3/M4 cameras
 PATH_OFF_SWITCHES = ("surfaceFollowModeEnable", "isRealtimeSurfaceFollow", "smartObliqueEnable",
                      "elevationOptimizeEnable")
+TERRAIN_SWITCHES = ("surfaceFollowModeEnable", "isRealtimeSurfaceFollow")      # on with terrain_follow
 
 
 def _bearing(a: list[float], b: list[float]) -> float:
@@ -183,7 +184,7 @@ GIMBAL_NADIR = """            <wpml:action>
 
 
 def build_waylines(old_waylines: str, prefix: str, lanes: list, height: float, speed: float,
-                   photo_spacing: float, lens_index: str) -> tuple[str, dict]:
+                   photo_spacing: float, lens_index: str, terrain_follow: bool = False) -> tuple[str, dict]:
     """waylines.wpml for the given lanes ([[lon, lat], [lon, lat]] in flying order). Returns (text, info)."""
     if not lanes:
         raise WpmlError("keine Flugbahnen in der Fl\u00e4che (Fl\u00e4che zu klein?)")
@@ -201,7 +202,8 @@ def build_waylines(old_waylines: str, prefix: str, lanes: list, height: float, s
     n = len(points)
     out = [head + "<Folder>",
            f"      <{prefix}:templateId>0</{prefix}:templateId>",
-           f"      <{prefix}:executeHeightMode>relativeToStartPoint</{prefix}:executeHeightMode>",
+           f"      <{prefix}:executeHeightMode>{'realTimeFollowSurface' if terrain_follow else 'relativeToStartPoint'}"
+           f"</{prefix}:executeHeightMode>",
            f"      <{prefix}:waylineId>0</{prefix}:waylineId>",
            f"      <{prefix}:distance>{length:.3f}</{prefix}:distance>",
            f"      <{prefix}:duration>{duration:.3f}</{prefix}:duration>",
@@ -360,14 +362,23 @@ def edit_copy(kmz: bytes, polygon: list[list[float]], params: dict) -> bytes:
         if mode is not None and (mode.text or "").strip() != "relativeToStartPoint":
             raise WpmlError(f"Vorlage mit H\u00f6henmodus {(mode.text or '').strip()} wird nicht unterst\u00fctzt "
                             "(nur relativ zum Startpunkt)")
+        terrain = bool(params.get("terrain_follow"))
         for name in PATH_OFF_SWITCHES:
-            text = _replace_value(text, prefix, name, "0")
+            on = terrain and name in TERRAIN_SWITCHES
+            text = _replace_value(text, prefix, name, "1" if on else "0")
+        if terrain:
+            # DJI real-time terrain follow (drone sensors), written like Pilot's own routes: switches on in the
+            # template, height = height above ground, waylines executeHeightMode realTimeFollowSurface
+            if _find(root, ns, "surfaceFollowModeEnable") is None:
+                raise WpmlError("Vorlage unterst\u00fctzt keine Gel\u00e4ndefolge")
+            text = _replace_value(text, prefix, "surfaceRelativeHeight", _fmt(new_height))
         old = files.get(WAYLINES, b"").decode("utf-8")
         wl_prefix = _wpml_prefix(old, ns) if old else prefix
         lens_index = params.get("image_format") or (_find(root, ns, "imageFormat").text
                                                      if _find(root, ns, "imageFormat") is not None else "visable")
         waylines, info = build_waylines(old, wl_prefix, path["lanes"], new_height, params["speed"],
-                                        path["photo_spacing"], lens_index.strip())
+                                        path["photo_spacing"], lens_index.strip(), terrain)
+        info["terrain_follow"] = terrain
         files[WAYLINES] = waylines.encode("utf-8")
         params["path_info"] = info
         if abs(info["speed"] - params["speed"]) > 1e-6:          # speed was reduced for the overlap: same in both files

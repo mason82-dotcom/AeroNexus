@@ -84,6 +84,23 @@ class GeneratedPathTest(unittest.TestCase):
         idx = [int(e.text) for e in root.findall(".//k:Placemark/w:index", ns)]
         self.assertEqual(idx, list(range(len(idx))))
 
+    def test_terrain_follow_like_pilot(self):
+        params, _ = plan_params(self.poly, dict(PARAMS, terrain_follow=True, height=60))
+        out = wpml.edit_copy(fx.make_kmz(), self.poly, params)
+        wl = fx.read(out, "wpmz/waylines.wpml").decode()
+        tpl = fx.read(out, "wpmz/template.kml").decode()
+        self.assertIn("<wpml:executeHeightMode>realTimeFollowSurface</wpml:executeHeightMode>", wl)
+        self.assertIn("<wpml:surfaceFollowModeEnable>1</wpml:surfaceFollowModeEnable>", tpl)
+        self.assertIn("<wpml:isRealtimeSurfaceFollow>1</wpml:isRealtimeSurfaceFollow>", tpl)
+        self.assertIn("<wpml:surfaceRelativeHeight>60</wpml:surfaceRelativeHeight>", tpl)
+        self.assertIn("<wpml:executeHeight>60</wpml:executeHeight>", wl)
+        self.assertTrue(params["path_info"]["terrain_follow"])
+
+    def test_without_terrain_follow_switches_are_off(self):
+        self.assertIn("<wpml:executeHeightMode>relativeToStartPoint</wpml:executeHeightMode>", self.wl)
+        self.assertIn("<wpml:surfaceFollowModeEnable>0</wpml:surfaceFollowModeEnable>", self.tpl)
+        self.assertFalse(self.params["path_info"]["terrain_follow"])
+
     def test_speed_is_reduced_to_keep_the_overlap(self):
         params, _ = plan_params(self.poly, dict(PARAMS, speed=15, height=30))
         out = wpml.edit_copy(fx.make_kmz(), self.poly, params)

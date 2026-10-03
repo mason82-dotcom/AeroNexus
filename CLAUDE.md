@@ -94,6 +94,8 @@ Editing routes (mapping-tool/service/app/wpml.py, verified with Pilot 2 on RC Pr
   of the same drone/camera (never build template.kml from scratch). Camera table per payload type (66/67/68/88/89)
   with GSD factors from DJI specs; presets pv_thermal / multispectral / ortho; imageFormat only for thermal cameras.
   Concave areas: boustrophedon cells (planner.flight_lines), lanes stay inside, cells flown one after another.
+  terrain_follow: DJI real-time terrain follow exactly like Pilot writes it (template surfaceFollowModeEnable /
+  isRealtimeSurfaceFollow 1, surfaceRelativeHeight = height; waylines executeHeightMode realTimeFollowSurface).
 
 ## Build notes
 - MySQL 8.4 LTS (upgraded in place from 8.0.39 on 2026-10-02, 8.0 is EOL). All users use caching_sha2_password;
