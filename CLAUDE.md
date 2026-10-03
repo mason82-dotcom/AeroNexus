@@ -11,6 +11,8 @@ Self-hosted drone platform on DJI Cloud API (DJI Pilot 2 -> own server). Monorep
 - New modules (rtk, photovoltaik-tool, ...) are own code in their folder, integrated into `edge/docker-compose.yml`.
 - Upstream commits are pinned in `edge/setup.sh`. Never track a branch.
 - All container images strictly pinned (no `latest`, no floating tags).
+  The Pi runs Watchtower (auto-updates at 04:00): every AeroNexus service carries the label
+  `com.centurylinklabs.watchtower.enable: "false"` (x-restart anchor in edge/docker-compose.yml); keep it on new services.
 - Secrets only in `edge/.env` (gitignored). `edge/.env.example` is the committed template.
 - Generated files live in `edge/runtime/` (gitignored), data in `edge/data/`, logs in `edge/logs/`.
   Backup: `edge/backup.sh` (daily cron) -> BACKUP_DIR; `edge/restore.sh --test` verifies a restore in

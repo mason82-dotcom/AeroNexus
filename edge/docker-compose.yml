@@ -4,6 +4,9 @@ name: aeronexus-edge
 
 x-restart: &restart
   restart: unless-stopped
+  # images are pinned on purpose (CLAUDE.md): the host's Watchtower must never swap them
+  labels: &no-watchtower
+    com.centurylinklabs.watchtower.enable: "false"
   logging: &logging
     driver: json-file
     options: { max-size: "10m", max-file: "3" }   # docker's default keeps container logs forever
@@ -114,6 +117,7 @@ services:
       - minio
     restart: "no"
     logging: *logging
+    labels: *no-watchtower
 
   mediamtx:
     <<: *restart
@@ -193,6 +197,7 @@ services:
         condition: service_healthy
     restart: "no"
     logging: *logging
+    labels: *no-watchtower
 
   mapping:
     <<: *restart
