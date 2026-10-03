@@ -82,6 +82,8 @@ Editing routes (mapping-tool/service/app/wpml.py, verified with Pilot 2 on RC Pr
   (minShootInterval = photo spacing / speed, >= 1.5 s, speed reduced otherwise) at index 0, stopTimeLapse at the
   last, relativeToStartPoint, stop at every lane end. Template: terrain follow / smart oblique / elevation
   optimisation set to 0. Never ship a copy whose waylines.wpml does not match template.kml.
+  Verified 2026-10-03 on RC Pro + M3E: Pilot 2 shows the generated lanes exactly like the web preview (30 deg).
+  Not yet verified in flight (photo trigger, speed).
 - Never re-serialize template.kml (ElementTree): Pilot 2 then read the polygon lat/lon swapped (route
   in Somalia). Edit values as text only, keep declaration, indentation and number style.
 - Height change of a web-edited copy: Pilot shows the new value from template.kml, but the executable path in
