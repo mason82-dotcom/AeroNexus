@@ -4,6 +4,7 @@ Only mapping2d templates are edited (polygon + a few parameters), as text, so ev
 stays byte-identical to what Pilot 2 wrote. See edit_copy for the Pilot 2 findings.
 """
 import io
+import math
 import re
 import time
 import xml.etree.ElementTree as ET
@@ -138,6 +139,153 @@ def _replace_if_changed(text: str, prefix: str, name: str, old: float | None, va
     return _replace_value(text, prefix, name, _fmt(value, digits))
 
 
+# ---------------------------------------------------------------- executable path (waylines.wpml)
+#
+# Pilot 2 does NOT recompute a synced area route: it flies waylines.wpml as it is (verified 2026-10-03).
+# So every copy gets a waylines.wpml generated from the planned lanes, built like Pilot's own nadir mapping
+# routes (shootType time): header + start actions of the template's waylines.wpml, one placemark per lane end,
+# gimbal -90 + startTimeLapse at the first point, stopTimeLapse at the last; constant height above take-off.
+# Template switches that would change the path (terrain follow, smart oblique, elevation optimisation) are off.
+
+MIN_SHOT_INTERVAL = 1.5          # s, timed shots faster than this are not reliable on M3/M4 cameras
+PATH_OFF_SWITCHES = ("surfaceFollowModeEnable", "isRealtimeSurfaceFollow", "smartObliqueEnable",
+                     "elevationOptimizeEnable")
+
+
+def _bearing(a: list[float], b: list[float]) -> float:
+    """-180..180 deg, clockwise from north (as Pilot writes waypointHeadingAngle)."""
+    k = math.cos(math.radians(a[1]))
+    return math.degrees(math.atan2((b[0] - a[0]) * k, b[1] - a[1]))
+
+
+def _dist(a: list[float], b: list[float]) -> float:
+    k = math.cos(math.radians(a[1]))
+    return math.hypot((b[0] - a[0]) * 111320.0 * k, (b[1] - a[1]) * 111320.0)
+
+
+GIMBAL_NADIR = """            <wpml:action>
+              <wpml:actionId>0</wpml:actionId>
+              <wpml:actionActuatorFunc>gimbalRotate</wpml:actionActuatorFunc>
+              <wpml:actionActuatorFuncParam>
+                <wpml:gimbalHeadingYawBase>aircraft</wpml:gimbalHeadingYawBase>
+                <wpml:gimbalRotateMode>absoluteAngle</wpml:gimbalRotateMode>
+                <wpml:gimbalPitchRotateEnable>1</wpml:gimbalPitchRotateEnable>
+                <wpml:gimbalPitchRotateAngle>-90</wpml:gimbalPitchRotateAngle>
+                <wpml:gimbalRollRotateEnable>0</wpml:gimbalRollRotateEnable>
+                <wpml:gimbalRollRotateAngle>0</wpml:gimbalRollRotateAngle>
+                <wpml:gimbalYawRotateEnable>0</wpml:gimbalYawRotateEnable>
+                <wpml:gimbalYawRotateAngle>0</wpml:gimbalYawRotateAngle>
+                <wpml:gimbalRotateTimeEnable>0</wpml:gimbalRotateTimeEnable>
+                <wpml:gimbalRotateTime>10</wpml:gimbalRotateTime>
+                <wpml:payloadPositionIndex>0</wpml:payloadPositionIndex>
+              </wpml:actionActuatorFuncParam>
+            </wpml:action>"""
+
+
+def build_waylines(old_waylines: str, prefix: str, lanes: list, height: float, speed: float,
+                   photo_spacing: float, lens_index: str) -> tuple[str, dict]:
+    """waylines.wpml for the given lanes ([[lon, lat], [lon, lat]] in flying order). Returns (text, info)."""
+    if not lanes:
+        raise WpmlError("keine Flugbahnen in der Fl\u00e4che (Fl\u00e4che zu klein?)")
+    if "<Folder>" not in old_waylines:
+        raise WpmlError("waylines.wpml der Vorlage ohne Folder")
+    head = old_waylines[:old_waylines.index("<Folder>")]
+    m = re.search(r"[ \t]*<%s:startActionGroup>.*?</%s:startActionGroup>\n?" % (prefix, prefix), old_waylines, re.S)
+    start_group = m.group(0) if m else ""
+    points = [p for lane in lanes for p in lane]
+    if speed * MIN_SHOT_INTERVAL > photo_spacing:
+        speed = max(1.0, photo_spacing / MIN_SHOT_INTERVAL)       # keep the overlap: never shoot faster
+    interval = photo_spacing / speed
+    length = sum(_dist(points[i], points[i + 1]) for i in range(len(points) - 1))
+    duration = length / speed + 3.0 * len(points)                 # stop at every lane end
+    n = len(points)
+    out = [head + "<Folder>",
+           f"      <{prefix}:templateId>0</{prefix}:templateId>",
+           f"      <{prefix}:executeHeightMode>relativeToStartPoint</{prefix}:executeHeightMode>",
+           f"      <{prefix}:waylineId>0</{prefix}:waylineId>",
+           f"      <{prefix}:distance>{length:.3f}</{prefix}:distance>",
+           f"      <{prefix}:duration>{duration:.3f}</{prefix}:duration>",
+           f"      <{prefix}:autoFlightSpeed>{_fmt(speed, 3)}</{prefix}:autoFlightSpeed>"]
+    if start_group:
+        out.append(start_group.rstrip("\n"))
+    for i, p in enumerate(points):
+        last = i == n - 1
+        heading = 0.0 if last else _bearing(p, points[i + 1])
+        pm = [f"      <Placemark>",
+              f"        <Point>",
+              f"          <coordinates>",
+              f"            {p[0]:.15g},{p[1]:.15g}",
+              f"          </coordinates>",
+              f"        </Point>",
+              f"        <{prefix}:index>{i}</{prefix}:index>",
+              f"        <{prefix}:executeHeight>{_fmt(height, 3)}</{prefix}:executeHeight>",
+              f"        <{prefix}:waypointSpeed>{_fmt(speed, 3)}</{prefix}:waypointSpeed>",
+              f"        <{prefix}:waypointHeadingParam>",
+              f"          <{prefix}:waypointHeadingMode>followWayline</{prefix}:waypointHeadingMode>",
+              f"          <{prefix}:waypointHeadingAngle>{_fmt(heading, 3)}</{prefix}:waypointHeadingAngle>",
+              f"          <{prefix}:waypointPoiPoint>0.000000,0.000000,0.000000</{prefix}:waypointPoiPoint>",
+              f"          <{prefix}:waypointHeadingAngleEnable>{0 if last else 1}</{prefix}:waypointHeadingAngleEnable>",
+              f"          <{prefix}:waypointHeadingPathMode>followBadArc</{prefix}:waypointHeadingPathMode>",
+              f"          <{prefix}:waypointHeadingPoiIndex>0</{prefix}:waypointHeadingPoiIndex>",
+              f"        </{prefix}:waypointHeadingParam>",
+              f"        <{prefix}:waypointTurnParam>",
+              f"          <{prefix}:waypointTurnMode>toPointAndStopWithDiscontinuityCurvature</{prefix}:waypointTurnMode>",
+              f"          <{prefix}:waypointTurnDampingDist>0</{prefix}:waypointTurnDampingDist>",
+              f"        </{prefix}:waypointTurnParam>",
+              f"        <{prefix}:useStraightLine>1</{prefix}:useStraightLine>"]
+        if i == 0:
+            pm += [f"        <{prefix}:actionGroup>",
+                   f"          <{prefix}:actionGroupId>0</{prefix}:actionGroupId>",
+                   f"          <{prefix}:actionGroupStartIndex>0</{prefix}:actionGroupStartIndex>",
+                   f"          <{prefix}:actionGroupEndIndex>{n - 1}</{prefix}:actionGroupEndIndex>",
+                   f"          <{prefix}:actionGroupMode>sequence</{prefix}:actionGroupMode>",
+                   f"          <{prefix}:actionTrigger>",
+                   f"            <{prefix}:actionTriggerType>betweenAdjacentPoints</{prefix}:actionTriggerType>",
+                   f"          </{prefix}:actionTrigger>",
+                   GIMBAL_NADIR.replace("wpml:", f"{prefix}:"),
+                   f"            <{prefix}:action>",
+                   f"              <{prefix}:actionId>1</{prefix}:actionId>",
+                   f"              <{prefix}:actionActuatorFunc>startTimeLapse</{prefix}:actionActuatorFunc>",
+                   f"              <{prefix}:actionActuatorFuncParam>",
+                   f"                <{prefix}:payloadPositionIndex>0</{prefix}:payloadPositionIndex>",
+                   f"                <{prefix}:useGlobalPayloadLensIndex>0</{prefix}:useGlobalPayloadLensIndex>",
+                   f"                <{prefix}:payloadLensIndex>{lens_index}</{prefix}:payloadLensIndex>",
+                   f"                <{prefix}:minShootInterval>{interval:.3f}</{prefix}:minShootInterval>",
+                   f"              </{prefix}:actionActuatorFuncParam>",
+                   f"            </{prefix}:action>",
+                   f"        </{prefix}:actionGroup>"]
+        if last:
+            pm += [f"        <{prefix}:actionGroup>",
+                   f"          <{prefix}:actionGroupId>1</{prefix}:actionGroupId>",
+                   f"          <{prefix}:actionGroupStartIndex>{i}</{prefix}:actionGroupStartIndex>",
+                   f"          <{prefix}:actionGroupEndIndex>{i}</{prefix}:actionGroupEndIndex>",
+                   f"          <{prefix}:actionGroupMode>sequence</{prefix}:actionGroupMode>",
+                   f"          <{prefix}:actionTrigger>",
+                   f"            <{prefix}:actionTriggerType>reachPoint</{prefix}:actionTriggerType>",
+                   f"          </{prefix}:actionTrigger>",
+                   f"          <{prefix}:action>",
+                   f"            <{prefix}:actionId>0</{prefix}:actionId>",
+                   f"            <{prefix}:actionActuatorFunc>stopTimeLapse</{prefix}:actionActuatorFunc>",
+                   f"            <{prefix}:actionActuatorFuncParam>",
+                   f"              <{prefix}:payloadPositionIndex>0</{prefix}:payloadPositionIndex>",
+                   f"              <{prefix}:payloadLensIndex>{lens_index}</{prefix}:payloadLensIndex>",
+                   f"            </{prefix}:actionActuatorFuncParam>",
+                   f"          </{prefix}:action>",
+                   f"        </{prefix}:actionGroup>"]
+        pm += [f"        <{prefix}:waypointGimbalHeadingParam>",
+               f"          <{prefix}:waypointGimbalPitchAngle>0</{prefix}:waypointGimbalPitchAngle>",
+               f"          <{prefix}:waypointGimbalYawAngle>0</{prefix}:waypointGimbalYawAngle>",
+               f"        </{prefix}:waypointGimbalHeadingParam>",
+               f"        <{prefix}:isRisky>0</{prefix}:isRisky>",
+               f"        <{prefix}:waypointWorkType>0</{prefix}:waypointWorkType>",
+               f"      </Placemark>"]
+        out += pm
+    out += ["    </Folder>", "  </Document>", "</kml>", ""]
+    info = {"waypoints": n, "lanes": len(lanes), "length_m": round(length), "duration_s": round(duration),
+            "speed": round(speed, 2), "shot_interval_s": round(interval, 2)}
+    return "\n".join(out), info
+
+
 def edit_copy(kmz: bytes, polygon: list[list[float]], params: dict) -> bytes:
     """Return a new KMZ with polygon and params replaced in template.kml.
 
@@ -204,6 +352,20 @@ def edit_copy(kmz: bytes, polygon: list[list[float]], params: dict) -> bytes:
     if check is None or len(check) != len(polygon) or any(
             abs(a[0] - b[0]) > 1e-9 or abs(a[1] - b[1]) > 1e-9 for a, b in zip(check, polygon)):
         raise WpmlError("interner Fehler: bearbeitetes Polygon nicht reproduzierbar")
+
+    path = params.get("path")
+    if path:
+        # executable path generated from the planned lanes (Pilot 2 flies waylines.wpml as it is)
+        for name in PATH_OFF_SWITCHES:
+            text = _replace_value(text, prefix, name, "0")
+        old = files.get(WAYLINES, b"").decode("utf-8")
+        wl_prefix = _wpml_prefix(old, ns) if old else prefix
+        lens_index = params.get("image_format") or (_find(root, ns, "imageFormat").text
+                                                     if _find(root, ns, "imageFormat") is not None else "visable")
+        waylines, info = build_waylines(old, wl_prefix, path["lanes"], new_height, params["speed"],
+                                        path["photo_spacing"], lens_index.strip())
+        files[WAYLINES] = waylines.encode("utf-8")
+        params["path_info"] = info
 
     out = io.BytesIO()
     with zipfile.ZipFile(out, "w", zipfile.ZIP_DEFLATED) as zf:

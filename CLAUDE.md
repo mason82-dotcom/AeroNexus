@@ -77,6 +77,11 @@ Editing routes (mapping-tool/service/app/wpml.py, verified with Pilot 2 on RC Pr
   the template's waylines.wpml would FLY THE OLD PATH (old area, direction, height). Proven: planned route with
   direction 30 / height 75 had the byte-identical waylines.wpml of template "Home" (lanes 178 deg, 50 m) and
   Pilot showed exactly those lanes. Pilot only downloads cloud routes; saving in Pilot uploads nothing back.
+- Since then every copy/planned route gets a generated waylines.wpml (wpml.build_waylines, from planner lanes):
+  header + startActionGroup of the template's waylines kept, 2 placemarks per lane, gimbal -90 + startTimeLapse
+  (minShootInterval = photo spacing / speed, >= 1.5 s, speed reduced otherwise) at index 0, stopTimeLapse at the
+  last, relativeToStartPoint, stop at every lane end. Template: terrain follow / smart oblique / elevation
+  optimisation set to 0. Never ship a copy whose waylines.wpml does not match template.kml.
 - Never re-serialize template.kml (ElementTree): Pilot 2 then read the polygon lat/lon swapped (route
   in Somalia). Edit values as text only, keep declaration, indentation and number style.
 - Height change of a web-edited copy: Pilot shows the new value from template.kml, but the executable path in

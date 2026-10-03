@@ -140,6 +140,7 @@ class RouteParams(BaseModel):
     overlap_w: int = Field(ge=10, le=90)            # %, across track
     speed: float = Field(ge=1, le=15)               # m/s
     image_format: str | None = Field(default=None, pattern=r"^(visable|ir|visable,ir)$")  # thermal cameras
+    lens: str | None = Field(default=None, pattern=r"^(wide|thermal|ms)$")  # camera that sets line/photo spacing
 
 
 class RouteCopy(BaseModel):

@@ -446,9 +446,18 @@ def build_router(settings: Settings, storage: Storage) -> APIRouter:
                     raise HTTPException(status_code=409, detail="Eine Route mit diesem Namen existiert bereits")
         finally:
             conn.close()
+        params = body.params.model_dump()
         try:
-            kmz = wpml.edit_copy(load_kmz(row), body.polygon, body.params.model_dump())
-        except wpml.WpmlError as exc:
+            # executable path from the planned lanes: Pilot 2 flies waylines.wpml as it is
+            lenses = planner.camera(payload_key(row))[1]
+            lens_key = params.get("lens") or ("thermal" if params.get("image_format") == "ir" else lenses[0].key)
+            ln = planner.lens(payload_key(row), lens_key)
+            across, along = planner.footprint_m(ln, params["height"])
+            lanes = planner.flight_lines(body.polygon, params["direction"], across * (1 - params["overlap_w"] / 100.0),
+                                         params["margin"])
+            params["path"] = {"lanes": lanes, "photo_spacing": along * (1 - params["overlap_h"] / 100.0)}
+            kmz = wpml.edit_copy(load_kmz(row), body.polygon, params)
+        except (wpml.WpmlError, planner.PlanError) as exc:
             raise HTTPException(status_code=422, detail=str(exc)) from exc
 
         # import through the DJI backend, exactly like a manual upload in the web UI
@@ -474,8 +483,8 @@ def build_router(settings: Settings, storage: Storage) -> APIRouter:
                 new = cur.fetchone()
         finally:
             conn.close()
-        log.info("route %s copied to '%s' by %s", wayline_id, body.name, user.username)
-        return {"id": new["wayline_id"] if new else None, "name": body.name}
+        log.info("route %s copied to '%s' by %s: %s", wayline_id, body.name, user.username, params.get("path_info"))
+        return {"id": new["wayline_id"] if new else None, "name": body.name, "path": params.get("path_info")}
 
     # ---------------------------------------------------------------- compute agent
 

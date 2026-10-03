@@ -66,6 +66,7 @@ Bisherige Patches:
 - **control 0021:** Seite Photovoltaik: Inspektionen, Hotspots auf der Karte, Bildausschnitte, Status, Bericht/CSV/GeoJSON
 - **control 0022:** Flugplanung: neue Flächenroute aus einer Pilot-Vorlage (Zweck, Bodenauflösung, Vorschau der Bahnen)
 - **control 0023:** Photovoltaik: Normalbild-Ausschnitt neben dem Wärmebild, PDF-Bericht
+- **control 0024:** Kopierte und geplante Routen enthalten ihre berechnete Flugbahn (Pilot 2 fliegt die mitgelieferte Bahn unverändert)
 
 Prüfen, ob die Patches vollständig sind und sauber auf die gepinnten Commits passen: `edge/verify-patches.sh`
 
