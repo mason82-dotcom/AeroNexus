@@ -15,7 +15,7 @@ DJI Pilot 2 auf der Fernsteuerung verbindet sich direkt mit dem eigenen Server, 
 | AeroNexus Fleet | `fleet/` | verfügbar | Gerätemodelle, Topologie, Gerätewörterbuch |
 | AeroNexus Telemetry | `telemetry/` | verfügbar | MQTT-Broker (EMQX), Livestream-Server (MediaMTX) |
 | AeroNexus Evidence | `evidence/` | Basis | Medienablage (S3/MinIO). Beweissicherung geplant |
-| AeroNexus Mission | `mission/` | Basis | Wegpunkt-Bibliothek. Eigene Missionsplanung geplant |
+| AeroNexus Mission | `mission/` | Basis | Einsatzplanung (Menü Aufgabenpläne, Dienst: mapping-tool/service), Flugplanung im Browser |
 | AeroNexus Mapping Tool | `mapping-tool/` | Basis | Leaflet-Karte (offline: Baden-Württemberg als Vektorkarte), Annotationen, Flugzonen, Kartierungsaufträge |
 | AeroNexus RTK | `rtk/` | geplant | Eigene RTK-Basis / NTRIP-Caster |
 | AeroNexus Photovoltaik Tool | `photovoltaik-tool/` | Basis | Thermografie von PV-Anlagen (M3T / M4T): Hotspots mit ΔT, Klasse, Position, Bericht |
@@ -70,6 +70,7 @@ Bisherige Patches:
 - **control 0024:** Kopierte und geplante Routen enthalten ihre berechnete Flugbahn (Pilot 2 fliegt die mitgelieferte Bahn unverändert)
 - **control 0025:** Offline-Luftbild (Orthofotos LGL BW DOP20, Open Data) als Kartenebene
 - **control 0026:** Schalter Geländefolge (DJI-Echtzeit) für geplante und kopierte Flächenrouten
+- **control 0027:** Aufgabenpläne als Einsatzplanung (Zweck, Routen, Drohne, Pilot, Checkliste, Status); „Meine Einsätze heute“ auf der Fernsteuerung
 
 Prüfen, ob die Patches vollständig sind und sauber auf die gepinnten Commits passen: `edge/verify-patches.sh`
 

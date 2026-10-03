@@ -1,0 +1,564 @@
+From ec408bac2906db4b8f9660a63aa64d10a72e7d81 Mon Sep 17 00:00:00 2001
+From: RomaN <mason82.rm@googlemail.com>
+Date: Sat, 3 Oct 2026 04:51:01 +0200
+Subject: [PATCH] onprem: mission planning page (task plans) and today's
+ missions on the remote controller
+
+---
+ src/api/missions.ts                      |  85 +++++++
+ src/components/pilot/PilotMissions.vue   |  71 ++++++
+ src/locales/de.ts                        |  36 +++
+ src/pages/page-pilot/pilot-home.vue      |   2 +
+ src/pages/page-web/projects/missions.vue | 290 +++++++++++++++++++++++
+ src/router/index.ts                      |   3 +-
+ 6 files changed, 486 insertions(+), 1 deletion(-)
+ create mode 100644 src/api/missions.ts
+ create mode 100644 src/components/pilot/PilotMissions.vue
+ create mode 100644 src/pages/page-web/projects/missions.vue
+
+diff --git a/src/api/missions.ts b/src/api/missions.ts
+new file mode 100644
+index 0000000..4f3ca5b
+--- /dev/null
++++ b/src/api/missions.ts
+@@ -0,0 +1,85 @@
++// Mission planning (mapping service, app/missions.py). Same login token as the DJI backend.
++import axios from 'axios'
++import { authToken, mappingBase } from '/@/api/mapping'
++import { ELocalStorageKey } from '/@/types/enums'
++
++export type MissionPurpose = 'pv' | 'farming' | 'mapping' | 'other'
++export type MissionStatus = 'planned' | 'ready' | 'flown' | 'evaluated' | 'cancelled'
++
++export interface CheckItem { key: string, label: string, done: boolean, by: string | null, at: string | null }
++
++export interface Mission {
++  id: string
++  title: string
++  purpose: MissionPurpose
++  purpose_label: string
++  planned_start: string // ISO UTC
++  duration_min: number | null
++  site: string
++  notes: string
++  drone_sn: string | null
++  pilot: string | null
++  wayline_ids: string[]
++  checklist: CheckItem[]
++  status: MissionStatus
++  created_by: string
++  status_at: string | null
++}
++
++export interface MissionInput {
++  title: string
++  purpose: MissionPurpose
++  planned_start: string
++  duration_min: number | null
++  site: string
++  notes: string
++  drone_sn: string | null
++  pilot: string | null
++  wayline_ids: string[]
++}
++
++export interface MissionOptions {
++  purposes: Record<MissionPurpose, string>
++  drones: { sn: string, name: string }[]
++  pilots: string[]
++  routes: { id: string, name: string }[]
++}
++
++const http = axios.create({ timeout: 15000 })
++http.interceptors.request.use(config => {
++  config.baseURL = mappingBase()
++  config.headers[ELocalStorageKey.Token] = authToken()
++  return config
++})
++
++export async function missionOptions (): Promise<MissionOptions> {
++  return (await http.get('/api/mapping/missions/options')).data
++}
++
++export async function listMissions (params: { start?: string, end?: string, mine?: boolean } = {}): Promise<Mission[]> {
++  return (await http.get('/api/mapping/missions', { params })).data
++}
++
++export async function createMission (body: MissionInput): Promise<Mission> {
++  return (await http.post('/api/mapping/missions', body)).data
++}
++
++export async function updateMission (id: string, body: MissionInput): Promise<Mission> {
++  return (await http.put(`/api/mapping/missions/${id}`, body)).data
++}
++
++export async function tickCheck (id: string, key: string, done: boolean): Promise<Mission> {
++  return (await http.put(`/api/mapping/missions/${id}/checklist/${key}`, { done })).data
++}
++
++export async function setMissionStatus (id: string, status: MissionStatus): Promise<Mission> {
++  return (await http.put(`/api/mapping/missions/${id}/status`, { status })).data
++}
++
++export async function deleteMission (id: string): Promise<void> {
++  await http.delete(`/api/mapping/missions/${id}`)
++}
++
++export const STATUS_COLORS: Record<MissionStatus, string> = {
++  planned: 'blue', ready: 'green', flown: 'purple', evaluated: 'default', cancelled: 'red',
++}
+diff --git a/src/components/pilot/PilotMissions.vue b/src/components/pilot/PilotMissions.vue
+new file mode 100644
+index 0000000..b3be45d
+--- /dev/null
++++ b/src/components/pilot/PilotMissions.vue
+@@ -0,0 +1,71 @@
++<template>
++  <div v-if="missions.length" class="pilot-missions">
++    <div class="mb5"><span class="ml5" style="color: #939393;">{{ $t('My missions today') }}</span></div>
++    <div v-for="m in missions" :key="m.id" class="card">
++      <div class="row" @click="openId = openId === m.id ? null : m.id">
++        <span class="time">{{ time(m.planned_start) }}</span>
++        <span class="name">{{ m.title }}</span>
++        <a-tag :color="STATUS_COLORS[m.status]">{{ $t(m.status) }}</a-tag>
++      </div>
++      <div class="meta">{{ m.purpose_label }}<span v-if="m.site"> &#183; {{ m.site }}</span>
++        &#183; {{ $t('Checklist {0}/{1}', m.checklist.filter(c => c.done).length, m.checklist.length) }}</div>
++      <div v-if="openId === m.id" class="detail">
++        <div v-if="m.notes" class="notes">{{ m.notes }}</div>
++        <div class="hint">{{ $t('Routes are in the Pilot 2 route library (cloud sync).') }}</div>
++        <div v-for="c in m.checklist" :key="c.key" class="check">
++          <a-checkbox :checked="c.done" :disabled="m.status === 'evaluated' || m.status === 'cancelled'"
++                      @change="(e) => check(m, c.key, e.target.checked)">{{ c.label }}</a-checkbox>
++        </div>
++        <a-button v-if="m.status === 'planned' || m.status === 'ready'" size="large" type="primary" block class="flown"
++                  @click="flown(m)">{{ $t('Mark as flown') }}</a-button>
++      </div>
++    </div>
++  </div>
++</template>
++
++<script lang="ts" setup>
++// onprem: missions of the logged-in pilot for today on the remote controller (Pilot 2 cloud page)
++import { onMounted, ref } from 'vue'
++import { message } from 'ant-design-vue'
++import moment from 'moment'
++import { t } from '/@/locales'
++import { Mission, STATUS_COLORS, listMissions, setMissionStatus, tickCheck } from '/@/api/missions'
++
++const missions = ref<Mission[]>([])
++const openId = ref<string | null>(null)
++
++function time (iso: string) { return moment(iso).format('HH:mm') }
++
++async function load () {
++  try {
++    missions.value = await listMissions({
++      start: moment().startOf('day').toISOString(), end: moment().endOf('day').toISOString(), mine: true,
++    })
++    if (missions.value.length === 1) openId.value = missions.value[0].id
++  } catch (e) {
++    missions.value = []                      // no mission service: the page works without this section
++  }
++}
++
++function replace (m: Mission) { missions.value = missions.value.map(x => (x.id === m.id ? m : x)) }
++
++async function check (m: Mission, key: string, done: boolean) {
++  try { replace(await tickCheck(m.id, key, done)) } catch (e) { message.error(t('Saving failed: ') + String(e)) }
++}
++
++async function flown (m: Mission) {
++  try { replace(await setMissionStatus(m.id, 'flown')) } catch (e) { message.error(t('Saving failed: ') + String(e)) }
++}
++
++onMounted(load)
++</script>
++
++<style lang="scss" scoped>
++.pilot-missions { margin-bottom: 10px; }
++.card { background: white; border-radius: 4px; padding: 10px 12px; margin-bottom: 6px; }
++.row { display: flex; align-items: center; gap: 10px; font-size: 16px;
++  .time { font-weight: 600; color: #2d8cf0; } .name { flex: 1; } }
++.meta { color: #939393; font-size: 13px; margin-top: 2px; }
++.detail { margin-top: 8px; .notes { white-space: pre-wrap; margin-bottom: 6px; } .hint { color: #939393; font-size: 12px; margin-bottom: 6px; }
++  .check { padding: 6px 0; border-bottom: 1px solid #f4f8f9; font-size: 15px; } .flown { margin-top: 10px; } }
++</style>
+diff --git a/src/locales/de.ts b/src/locales/de.ts
+index 77075f2..bf17b39 100644
+--- a/src/locales/de.ts
++++ b/src/locales/de.ts
+@@ -626,4 +626,40 @@ export default {
+   "{0} lanes, {1} min, photo every {2} s.": "{0} Bahnen, {1} min, Foto alle {2} s.",
+   "Terrain follow": "Geländefolge",
+   "Real-time terrain follow with the drone sensors: the height is kept above the ground below instead of above the take-off point": "Echtzeit-Geländefolge mit den Sensoren der Drohne: Die Höhe gilt über dem Boden darunter statt über dem Startpunkt",
++  "Cancel mission": "Einsatz absagen",
++  "Checklist": "Checkliste",
++  "Checklist {0}/{1}": "Checkliste {0}/{1}",
++  "Date and time": "Datum und Uhrzeit",
++  "Delete this mission?": "Diesen Einsatz löschen?",
++  "Duration (min)": "Dauer (min)",
++  "Edit mission": "Einsatz bearbeiten",
++  "Mark as evaluated": "Als ausgewertet markieren",
++  "Mark as flown": "Als geflogen markieren",
++  "Mission saved": "Einsatz gespeichert",
++  "Missions for remote controller flights: plan, check, fly, evaluate.": "Einsätze für Flüge mit Fernsteuerung: planen, prüfen, fliegen, auswerten.",
++  "My missions today": "Meine Einsätze heute",
++  "New mission": "Neuer Einsatz",
++  "No route assigned": "Keine Route zugeordnet",
++  "Notes": "Notizen",
++  "Past (30 days)": "Vergangen (30 Tage)",
++  "Pilot": "Pilot",
++  "Plan again": "Wieder planen",
++  "Ready": "Bereit",
++  "Remote start is only possible with a DJI Dock: open the route in Pilot 2 on the remote controller and start it there.": "Fernstart ist nur mit einem DJI Dock möglich: Route in Pilot 2 auf der Fernsteuerung öffnen und dort starten.",
++  "Routes": "Routen",
++  "Routes are in the Pilot 2 route library (cloud sync).": "Die Routen liegen in der Routenbibliothek von Pilot 2 (Cloud-Synchronisierung).",
++  "Routes from the library": "Routen aus der Bibliothek",
++  "Save": "Speichern",
++  "Site": "Ort",
++  "The checklist follows the purpose; ticked items are kept when the purpose changes.": "Die Checkliste richtet sich nach dem Zweck; abgehakte Punkte bleiben bei einem Wechsel erhalten.",
++  "Title": "Titel",
++  "Today": "Heute",
++  "Upcoming": "Demnächst",
++  "cancelled": "abgesagt",
++  "deleted route": "gelöschte Route",
++  "e.g. PV roof barn": "z. B. PV-Dach Scheune",
++  "evaluated": "ausgewertet",
++  "flown": "geflogen",
++  "planned": "geplant",
++  "ready": "bereit",
+ } as Record<string, string>
+diff --git a/src/pages/page-pilot/pilot-home.vue b/src/pages/page-pilot/pilot-home.vue
+index 0b51521..fa82707 100644
+--- a/src/pages/page-pilot/pilot-home.vue
++++ b/src/pages/page-pilot/pilot-home.vue
+@@ -54,6 +54,7 @@
+       </div>
+     </a-layout-sider>
+     <a-layout-content class="right flex-column">
++      <PilotMissions />
+       <div class="mb5">
+         <span class="ml5" style="color: #939393;">{{ $t('Serial Number') }}</span>
+       </div>
+@@ -120,6 +121,7 @@
+   </a-layout>
+ </template>
+ <script lang="ts" setup>
++import PilotMissions from '/@/components/pilot/PilotMissions.vue'
+ import { t } from '/@/locales'
+ import { message, Popconfirm } from 'ant-design-vue'
+ import { onMounted, onUnmounted, reactive, ref, watch } from 'vue'
+diff --git a/src/pages/page-web/projects/missions.vue b/src/pages/page-web/projects/missions.vue
+new file mode 100644
+index 0000000..2a402e8
+--- /dev/null
++++ b/src/pages/page-web/projects/missions.vue
+@@ -0,0 +1,290 @@
++<template>
++  <div class="missions-wrapper height-100">
++    <Title :title="$t('Task Plan Library')" />
++    <div class="missions-content uranus-scrollbar">
++      <div class="head">
++        <span class="hint">{{ $t('Missions for remote controller flights: plan, check, fly, evaluate.') }}</span>
++        <span>
++          <a class="reload" @click="refresh"><ReloadOutlined /></a>
++          <a-button size="small" type="primary" @click="openForm()">{{ $t('New mission') }}</a-button>
++        </span>
++      </div>
++
++      <div v-for="group in groups" :key="group.key" class="section">
++        <div class="section-head">{{ $t(group.label) }} <span class="count">{{ group.items.length }}</span></div>
++        <div v-if="!group.items.length" class="hint">{{ $t('None') }}</div>
++        <div v-for="m in group.items" :key="m.id" class="item" :class="{ open: openId === m.id }">
++          <div class="row" @click="toggle(m)">
++            <span class="time">{{ fmtTime(m.planned_start, group.key !== 'today') }}</span>
++            <span class="name" :title="m.title">{{ m.title }}</span>
++            <a-tag :color="STATUS_COLORS[m.status]" class="tag">{{ $t(statusText[m.status]) }}</a-tag>
++          </div>
++          <div class="meta">
++            {{ m.purpose_label }}<span v-if="m.site"> &#183; {{ m.site }}</span>
++            <span v-if="m.drone_sn"> &#183; {{ droneName(m.drone_sn) }}</span>
++            <span v-if="m.pilot"> &#183; {{ m.pilot }}</span>
++            &#183; {{ $t('Checklist {0}/{1}', m.checklist.filter(c => c.done).length, m.checklist.length) }}
++          </div>
++
++          <div v-if="openId === m.id" class="detail">
++            <div v-if="m.notes" class="notes">{{ m.notes }}</div>
++            <div class="label">{{ $t('Routes') }}</div>
++            <div v-if="!m.wayline_ids.length" class="hint">{{ $t('No route assigned') }}</div>
++            <div v-for="id in m.wayline_ids" :key="id" class="route">
++              <a @click="showRoute(id)"><AimOutlined /> {{ routeName(id) }}</a>
++            </div>
++            <div class="label">{{ $t('Checklist') }}</div>
++            <div v-for="c in m.checklist" :key="c.key" class="check">
++              <a-checkbox :checked="c.done" :disabled="m.status === 'evaluated' || m.status === 'cancelled'"
++                          @change="(e) => check(m, c.key, e.target.checked)">{{ c.label }}</a-checkbox>
++              <span v-if="c.done && c.by" class="by">{{ c.by }}, {{ fmtTime(c.at, true) }}</span>
++            </div>
++            <div class="actions">
++              <a-button v-for="s in nextStatus[m.status]" :key="s" size="small" @click="setStatus(m, s)">
++                {{ $t(actionText[s]) }}
++              </a-button>
++              <a-button size="small" @click="openForm(m)">{{ $t('Edit') }}</a-button>
++              <a-popconfirm :title="$t('Delete this mission?')" :ok-text="$t('Delete')" :cancel-text="$t('Cancel')"
++                            @confirm="remove(m)">
++                <a-button size="small" danger>{{ $t('Delete') }}</a-button>
++              </a-popconfirm>
++            </div>
++            <div class="hint">{{ $t('Remote start is only possible with a DJI Dock: open the route in Pilot 2 on the remote controller and start it there.') }}</div>
++          </div>
++        </div>
++      </div>
++    </div>
++
++    <a-modal v-model:visible="formVisible" :title="editing ? $t('Edit mission') : $t('New mission')" :confirm-loading="saving"
++             :ok-text="$t('Save')" :ok-button-props="{ disabled: !form.title.trim() || !form.start }" width="560px" @ok="save">
++      <a-form layout="vertical">
++        <a-form-item :label="$t('Title')">
++          <a-input v-model:value="form.title" :maxlength="120" :placeholder="$t('e.g. PV roof barn')" />
++        </a-form-item>
++        <div class="two">
++          <a-form-item :label="$t('Purpose')">
++            <a-select v-model:value="form.purpose">
++              <a-select-option v-for="(label, key) in options.purposes" :key="key" :value="key">{{ label }}</a-select-option>
++            </a-select>
++          </a-form-item>
++          <a-form-item :label="$t('Site')">
++            <a-input v-model:value="form.site" :maxlength="120" />
++          </a-form-item>
++        </div>
++        <div class="two">
++          <a-form-item :label="$t('Date and time')">
++            <a-date-picker v-model:value="form.start" show-time format="DD.MM.YYYY HH:mm" :minute-step="5" style="width: 100%" />
++          </a-form-item>
++          <a-form-item :label="$t('Duration (min)')">
++            <a-input-number v-model:value="form.duration_min" :min="1" :max="1440" style="width: 100%" />
++          </a-form-item>
++        </div>
++        <div class="two">
++          <a-form-item :label="$t('Drone')">
++            <a-select v-model:value="form.drone_sn" allow-clear>
++              <a-select-option v-for="d in options.drones" :key="d.sn" :value="d.sn">{{ d.name }}</a-select-option>
++            </a-select>
++          </a-form-item>
++          <a-form-item :label="$t('Pilot')">
++            <a-select v-model:value="form.pilot" allow-clear>
++              <a-select-option v-for="p in options.pilots" :key="p" :value="p">{{ p }}</a-select-option>
++            </a-select>
++          </a-form-item>
++        </div>
++        <a-form-item :label="$t('Routes')">
++          <a-select v-model:value="form.wayline_ids" mode="multiple" :filter-option="filterRoute" :placeholder="$t('Routes from the library')">
++            <a-select-option v-for="r in options.routes" :key="r.id" :value="r.id">{{ r.name }}</a-select-option>
++          </a-select>
++        </a-form-item>
++        <a-form-item :label="$t('Notes')">
++          <a-textarea v-model:value="form.notes" :rows="3" :maxlength="4000" />
++        </a-form-item>
++        <div class="hint">{{ $t('The checklist follows the purpose; ticked items are kept when the purpose changes.') }}</div>
++      </a-form>
++    </a-modal>
++  </div>
++</template>
++
++<script lang="ts" setup>
++import { t } from '/@/locales'
++import { computed, onMounted, reactive, ref } from 'vue'
++import { message } from 'ant-design-vue'
++import { AimOutlined, ReloadOutlined } from '@ant-design/icons-vue'
++import moment, { Moment } from 'moment'
++import Title from '/@/components/workspace/Title.vue'
++import {
++  Mission, MissionOptions, MissionPurpose, MissionStatus, STATUS_COLORS, createMission, deleteMission, listMissions,
++  missionOptions, setMissionStatus, tickCheck, updateMission,
++} from '/@/api/missions'
++import { getRouteGeometry } from '/@/api/mapping'
++import { useRouteOverlay } from '/@/hooks/use-route-overlay'
++
++const missions = ref<Mission[]>([])
++const options = ref<MissionOptions>({ purposes: {} as any, drones: [], pilots: [], routes: [] })
++const openId = ref<string | null>(null)
++const formVisible = ref(false)
++const saving = ref(false)
++const editing = ref<Mission | null>(null)
++const form = reactive({
++  title: '', purpose: 'pv' as MissionPurpose, start: null as Moment | null, duration_min: 30 as number | null,
++  site: '', notes: '', drone_sn: undefined as string | undefined, pilot: undefined as string | undefined,
++  wayline_ids: [] as string[],
++})
++const routeOverlay = useRouteOverlay()
++
++const statusText: Record<MissionStatus, string> = {
++  planned: 'planned', ready: 'ready', flown: 'flown', evaluated: 'evaluated', cancelled: 'cancelled',
++}
++const actionText: Record<string, string> = {
++  flown: 'Mark as flown', evaluated: 'Mark as evaluated', cancelled: 'Cancel mission', planned: 'Plan again', ready: 'Ready',
++}
++// manual transitions offered as buttons (planned <-> ready follows the checklist)
++const nextStatus: Record<MissionStatus, MissionStatus[]> = {
++  planned: ['flown', 'cancelled'], ready: ['flown', 'cancelled'], flown: ['evaluated'], evaluated: ['flown'], cancelled: ['planned'],
++}
++
++const groups = computed(() => {
++  const startToday = moment().startOf('day')
++  const endToday = moment().endOf('day')
++  const items = [...missions.value]
++  return [
++    { key: 'today', label: 'Today', items: items.filter(m => moment(m.planned_start).isBetween(startToday, endToday, undefined, '[]')) },
++    { key: 'upcoming', label: 'Upcoming', items: items.filter(m => moment(m.planned_start).isAfter(endToday)) },
++    {
++      key: 'past',
++      label: 'Past (30 days)',
++      items: items.filter(m => moment(m.planned_start).isBefore(startToday)).reverse(),
++    },
++  ]
++})
++
++function fmtTime (iso: string | null, withDate: boolean): string {
++  if (!iso) return ''
++  return moment(iso).format(withDate ? 'DD.MM. HH:mm' : 'HH:mm')
++}
++function droneName (sn: string) { return options.value.drones.find(d => d.sn === sn)?.name || sn }
++function routeName (id: string) { return options.value.routes.find(r => r.id === id)?.name || t('deleted route') }
++function filterRoute (input: string, option: any) {
++  return String(option.children?.[0]?.children || '').toLowerCase().includes(input.toLowerCase())
++}
++function errorText (e: any): string {
++  const d = e?.response?.data?.detail
++  return Array.isArray(d) ? d.map((x: any) => x.msg).join('; ') : (d || String(e))
++}
++
++async function refresh () {
++  try {
++    const [opts, list] = await Promise.all([
++      missionOptions(),
++      listMissions({ start: moment().subtract(30, 'days').startOf('day').toISOString() }),
++    ])
++    options.value = opts
++    missions.value = list
++  } catch (e) {
++    message.error(t('Mapping service not reachable'))
++  }
++}
++
++function replace (m: Mission) {
++  missions.value = missions.value.map(x => (x.id === m.id ? m : x))
++}
++
++function toggle (m: Mission) {
++  openId.value = openId.value === m.id ? null : m.id
++  if (openId.value && m.wayline_ids.length) showRoute(m.wayline_ids[0])
++}
++
++async function showRoute (id: string) {
++  try {
++    routeOverlay.show(await getRouteGeometry(id))
++  } catch (e) {
++    message.error(t('Route cannot be shown: mapping service not reachable or file unreadable'))
++  }
++}
++
++async function check (m: Mission, key: string, done: boolean) {
++  try {
++    replace(await tickCheck(m.id, key, done))
++  } catch (e) {
++    message.error(t('Saving failed: ') + errorText(e))
++  }
++}
++
++async function setStatus (m: Mission, s: MissionStatus) {
++  try {
++    replace(await setMissionStatus(m.id, s))
++  } catch (e) {
++    message.error(t('Saving failed: ') + errorText(e))
++  }
++}
++
++async function remove (m: Mission) {
++  try {
++    await deleteMission(m.id)
++    missions.value = missions.value.filter(x => x.id !== m.id)
++    routeOverlay.clear()
++  } catch (e) {
++    message.error(t('Deleting failed: ') + errorText(e))
++  }
++}
++
++function openForm (m?: Mission) {
++  editing.value = m || null
++  Object.assign(form, m
++    ? {
++        title: m.title, purpose: m.purpose, start: moment(m.planned_start), duration_min: m.duration_min, site: m.site,
++        notes: m.notes, drone_sn: m.drone_sn || undefined, pilot: m.pilot || undefined, wayline_ids: [...m.wayline_ids],
++      }
++    : {
++        title: '', purpose: 'pv', start: moment().add(1, 'day').hour(12).minute(0).second(0), duration_min: 30, site: '',
++        notes: '', drone_sn: undefined, pilot: undefined, wayline_ids: [],
++      })
++  formVisible.value = true
++}
++
++async function save () {
++  saving.value = true
++  const body = {
++    title: form.title.trim(), purpose: form.purpose, planned_start: (form.start as Moment).toISOString(),
++    duration_min: form.duration_min || null, site: form.site.trim(), notes: form.notes, drone_sn: form.drone_sn || null,
++    pilot: form.pilot || null, wayline_ids: form.wayline_ids,
++  }
++  try {
++    const m = editing.value ? await updateMission(editing.value.id, body) : await createMission(body)
++    if (editing.value) replace(m)
++    else missions.value = [...missions.value, m].sort((a, b) => a.planned_start.localeCompare(b.planned_start))
++    formVisible.value = false
++    openId.value = m.id
++    message.success(t('Mission saved'))
++  } catch (e) {
++    message.error(t('Saving failed: ') + errorText(e))
++  } finally {
++    saving.value = false
++  }
++}
++
++onMounted(refresh)
++</script>
++
++<style lang="scss" scoped>
++.missions-wrapper { display: flex; flex-direction: column; }
++.missions-content { flex: 1; overflow-y: auto; padding: 0 12px 12px; color: #fff; }
++.head { display: flex; justify-content: space-between; align-items: center; gap: 8px; margin: 8px 0; }
++.reload { margin-right: 10px; }
++.section { margin-top: 12px; }
++.section-head { font-weight: 600; margin-bottom: 4px; .count { color: #888; font-weight: 400; margin-left: 4px; } }
++.item { padding: 6px; border-bottom: 1px solid #3c3c3c; &.open { background: #2d3442; } }
++.row { display: flex; align-items: center; gap: 8px; cursor: pointer;
++  .time { color: #8fc3ff; font-variant-numeric: tabular-nums; min-width: 44px; }
++  .name { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
++  .tag { margin-right: 0; } }
++.meta { color: #aaa; font-size: 12px; margin-top: 2px; }
++.detail { margin-top: 8px; font-size: 13px;
++  .label { color: #aaa; font-size: 12px; margin-top: 8px; }
++  .notes { white-space: pre-wrap; color: #ddd; }
++  .route { margin: 2px 0; }
++  .check { margin: 3px 0; :deep(.ant-checkbox-wrapper) { color: #ddd; font-size: 12px; } .by { color: #888; font-size: 11px; margin-left: 24px; display: block; } }
++  .actions { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px; } }
++.hint { color: #888; font-size: 12px; margin-top: 6px; }
++.two { display: grid; grid-template-columns: 1fr 1fr; column-gap: 12px; }
++</style>
+diff --git a/src/router/index.ts b/src/router/index.ts
+index 798284b..6e9be4f 100644
+--- a/src/router/index.ts
++++ b/src/router/index.ts
+@@ -84,7 +84,8 @@ const routes: Array<RouteRecordRaw> = [
+       {
+         path: '/' + ERouterName.TASK,
+         name: ERouterName.TASK,
+-        component: () => import('/@/pages/page-web/projects/task.vue'),
++        // onprem: mission planning for remote controller operation (Dock task plans: task.vue, unused)
++        component: () => import('/@/pages/page-web/projects/missions.vue'),
+         children: [
+           {
+             path: ERouterName.CREATE_PLAN,
+-- 
+2.47.3
+
