@@ -115,7 +115,9 @@ def parse(kmz: bytes) -> Route:
 
 
 def _fmt(value: float, digits: int = 6) -> str:
-    return f"{value:.{digits}f}".rstrip("0").rstrip(".")
+    """75.000000 -> 75, 7.290 -> 7.29; whole numbers keep their zeros (70 stays 70, 90 stays 90)."""
+    text = f"{value:.{digits}f}"
+    return text.rstrip("0").rstrip(".") if "." in text else text
 
 
 def _wpml_prefix(text: str, ns: str) -> str:

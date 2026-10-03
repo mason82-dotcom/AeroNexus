@@ -96,6 +96,18 @@ class EditCopyTest(unittest.TestCase):
         self.assertIn("<wpml:orthoLidarOverlapW>65</wpml:orthoLidarOverlapW>", text)
         self.assertIn("<wpml:autoFlightSpeed>8.5</wpml:autoFlightSpeed>", text)
 
+    def test_values_ending_in_zero(self):
+        # regression: _fmt stripped the zero of whole numbers (overlap 70 -> 7, direction 90 -> 9, 2026-10-03)
+        params = dict(PARAMS, height=100, direction=90, margin=10, overlap_h=60, overlap_w=70, speed=10)
+        text = fx.read(wpml.edit_copy(fx.make_kmz(), fx.POLYGON, params), "wpmz/template.kml").decode()
+        for tag, value in (("direction", "90"), ("margin", "10"), ("orthoCameraOverlapH", "60"),
+                           ("orthoCameraOverlapW", "70"), ("orthoLidarOverlapW", "70"), ("autoFlightSpeed", "10"),
+                           ("globalShootHeight", "100"), ("height", "100")):
+            self.assertIn(f"<wpml:{tag}>{value}</wpml:{tag}>", text, tag)
+        for v in (0, 7.29, 7.5, 180, 359):
+            self.assertEqual(float(wpml._fmt(v, 3)), v)
+        self.assertEqual([wpml._fmt(v, 0) for v in (90, 100, 0, 45)], ["90", "100", "0", "45"])
+
     def test_waylines_kept_unchanged(self):
         kmz = fx.make_kmz()
         out = wpml.edit_copy(kmz, SHIFTED, PARAMS)
