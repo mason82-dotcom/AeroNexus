@@ -1,4 +1,4 @@
-From 1a7c3f1796bb7a6a01003f563924421d98a702fb Mon Sep 17 00:00:00 2001
+From f4e6947c386437a6ec22c6912223c2435b0a3853 Mon Sep 17 00:00:00 2001
 From: RomaN <mason82.rm@googlemail.com>
 Date: Fri, 2 Oct 2026 22:57:53 +0200
 Subject: [PATCH] onprem: Photovoltaik page (thermal inspections, hot spots on
@@ -278,7 +278,7 @@ index d706031..0ef7e7c 100644
  } as Record<string, string>
 diff --git a/src/pages/page-web/projects/photovoltaik.vue b/src/pages/page-web/projects/photovoltaik.vue
 new file mode 100644
-index 0000000..651c9b3
+index 0000000..fcd9f7f
 --- /dev/null
 +++ b/src/pages/page-web/projects/photovoltaik.vue
 @@ -0,0 +1,369 @@
@@ -422,7 +422,7 @@ index 0000000..651c9b3
 +                <a-input-number v-model:value="form.thermal.reflected_temp" :min="-40" :max="100" />
 +              </a-form-item>
 +              <a-form-item :label="$t('Humidity (%)')">
-+                <a-input-number v-model:value="form.thermal.humidity" :min="0" :max="100" />
++                <a-input-number v-model:value="form.thermal.humidity" :min="20" :max="100" />
 +              </a-form-item>
 +              <a-form-item :label="$t('Min. Delta-T (K)')">
 +                <a-input-number v-model:value="form.detect.min_delta" :min="1" :max="50" :step="0.5" />

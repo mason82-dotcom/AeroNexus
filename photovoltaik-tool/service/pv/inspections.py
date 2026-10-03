@@ -31,7 +31,7 @@ STATUSES = ("open", "confirmed", "dismissed")
 CLASS_TEXT = {1: "beobachten", 2: "Wartung planen", 3: "dringend"}
 _jobs: "queue.Queue[str]" = queue.Queue()
 _lock = threading.Lock()                 # meta.json / anomalies.json read-modify-write
-tsdk = Tsdk(settings.tsdk_dir)
+tsdk = Tsdk(settings.tsdk_url)
 
 
 def converter(jpeg: bytes, tp: ThermalParams, distance: float):
@@ -180,7 +180,9 @@ def start_worker() -> None:
 
 @route("GET", "/api/pv/status")
 def status(req, user):
-    return {"tsdk": tsdk.available(), "queue": _jobs.qsize()}
+    h = tsdk.health()
+    return {"tsdk": bool(h.get("sdk")), "tsdk_runner": h.get("runner"), "tsdk_version": h.get("version"),
+            "queue": _jobs.qsize()}
 
 
 @route("POST", "/api/pv/inspections")

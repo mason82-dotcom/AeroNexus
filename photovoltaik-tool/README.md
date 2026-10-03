@@ -25,15 +25,21 @@ Fehlerart (Zelle, Substring, Modul, String) und Fläche sind Schätzungen aus de
 ## DJI Thermal SDK
 
 Die Umrechnung der Rohwerte in Temperaturen macht DJIs Thermal SDK (proprietär, DJI-Lizenz). Es ist deshalb
-nicht im Repository und muss einmal selbst geladen werden:
+nicht im Repository und muss einmal selbst geladen werden (getestet: v1.8 vom 29.08.2025, unterstützt M3T/M4T):
 
 ```bash
 # Download: https://www.dji.com/downloads/softwares/dji-thermal-sdk (Lizenz akzeptieren)
 photovoltaik-tool/tools/install-tsdk.sh ~/Downloads/dji_thermal_sdk_v1.8_*.zip
-cd edge && docker compose restart pv
+cd edge && docker compose restart tsdk pv
 ```
 
-Ohne SDK zeigt die Seite einen Hinweis; Inspektionen schlagen mit „DJI Thermal SDK nicht installiert“ fehl.
+DJI liefert das SDK für Linux nur als x64. Es läuft im Hilfscontainer `tsdk` (`photovoltaik-tool/tsdk`):
+auf einem x64-Server direkt, auf dem Raspberry Pi 5 mit dem x64-Emulator **Box64** (ca. 0,9 s pro Bild).
+qemu scheidet auf dem Pi 5 aus: dessen Kernel nutzt 16-KB-Speicherseiten, die SDK-Bibliotheken lassen sich
+damit unter qemu nicht laden. Der Container ist nur intern erreichbar; `pv` schickt ihm das R-JPEG und erhält
+die Temperaturen (640 × 512, °C).
+
+Ohne SDK zeigt die Seite einen Hinweis; Inspektionen schlagen mit „DJI Thermal SDK fehlt“ fehl.
 
 ## Technik
 

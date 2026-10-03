@@ -18,7 +18,7 @@ class Settings:
     media_bucket: str           # Pilot 2 uploads (read only)
     bucket: str                 # own bucket: inspections, crops, exports
     web_origin: str             # browser origin of the web UI (CORS)
-    tsdk_dir: str               # DJI Thermal SDK (not in the repo, see photovoltaik-tool/README.md)
+    tsdk_url: str               # helper container running the DJI Thermal SDK (photovoltaik-tool/tsdk)
 
 
 def load() -> Settings:
@@ -32,5 +32,5 @@ def load() -> Settings:
         media_bucket=_env("MINIO_BUCKET", "dji-cloud"),
         bucket=_env("PV_BUCKET", "pv-inspections"),
         web_origin=_env("WEB_ORIGIN", "*"),
-        tsdk_dir=_env("TSDK_DIR", "/opt/dji-tsdk"),
+        tsdk_url=_env("TSDK_URL", "http://tsdk:6793"),
     )

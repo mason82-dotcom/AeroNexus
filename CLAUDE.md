@@ -129,8 +129,10 @@ Editing routes (mapping-tool/service/app/wpml.py, verified with Pilot 2 on RC Pr
   same server/auth pattern as farming. Bucket `pv-inspections`, MinIO user `pvtool` (S3 names need >= 3 chars).
 - Input: DJI R-JPEG thermal photos (`*_T.JPG`): 1280x1024 colour JPEG + APP3 raw 640x512 uint16 + XMP
   drone-dji (GPS, gimbal, LRF target). Focal length from EXIF (M3T 9.1 mm, M4T 12 mm), pixel pitch 12 um.
-- Temperatures only via the DJI Thermal SDK CLI `dji_irp` (proprietary, never commit it): installed by
-  `photovoltaik-tool/tools/install-tsdk.sh` into edge/runtime/dji-tsdk, mounted at /opt/dji-tsdk.
+- Temperatures only via the DJI Thermal SDK CLI `dji_irp` (proprietary, never commit it; v1.8 is Linux x64
+  only): `photovoltaik-tool/tools/install-tsdk.sh` -> edge/runtime/dji-tsdk, mounted into the internal helper
+  container `tsdk` (photovoltaik-tool/tsdk, Debian trixie). On the Pi 5 it runs under Box64 (0.9 s/image);
+  qemu fails there (16 KB kernel pages, SDK libs are 4 KB aligned -> mmap EFAULT). pv calls POST /measure.
 - Detection (detect.py): p75 block background, candidates >= min_delta, Delta-T against a 4 px ring (p75),
   long (> half image) / large (> 5 %) areas dropped but searched for spots inside. Geo (geo.py): pinhole ray
   onto a plane at LRF target height (roofs) or take-off height. Keep tests for both (synthetic scenes).

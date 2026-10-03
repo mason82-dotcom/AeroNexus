@@ -281,11 +281,8 @@ services:
       MINIO_BUCKET: ${MINIO_BUCKET}
       PV_BUCKET: pv-inspections
       WEB_ORIGIN: http://${SERVER_HOST}:8085
-      TSDK_DIR: /opt/dji-tsdk
+      TSDK_URL: http://tsdk:6793
       TZ: Europe/Berlin
-    volumes:
-      # DJI Thermal SDK (proprietary, not in the repo): photovoltaik-tool/tools/install-tsdk.sh
-      - ./runtime/dji-tsdk:/opt/dji-tsdk:ro
     ports:
       - "6792:6792"     # pv API (web UI)
     healthcheck:
@@ -299,6 +296,18 @@ services:
         condition: service_completed_successfully
       mapping:
         condition: service_healthy
+      tsdk:
+        condition: service_started
+
+  tsdk:
+    <<: *restart
+    # DJI Thermal SDK runner for pv (x64 only from DJI: Box64 on the Pi, native on x64). Internal, no port.
+    build:
+      context: ../photovoltaik-tool/tsdk
+    image: aeronexus/tsdk:local
+    volumes:
+      # DJI Thermal SDK (proprietary, not in the repo): photovoltaik-tool/tools/install-tsdk.sh
+      - ./runtime/dji-tsdk:/opt/dji-tsdk:ro
 
   control:
     <<: *restart
