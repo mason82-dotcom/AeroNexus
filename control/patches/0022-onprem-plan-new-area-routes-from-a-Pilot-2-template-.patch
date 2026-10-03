@@ -1,0 +1,531 @@
+From 7c946268225af6e1b631e536694e42ca42d2f543 Mon Sep 17 00:00:00 2001
+From: RomaN <mason82.rm@googlemail.com>
+Date: Sat, 3 Oct 2026 02:22:12 +0200
+Subject: [PATCH] onprem: plan new area routes from a Pilot 2 template (purpose
+ presets, GSD, preview)
+
+---
+ src/api/mapping.ts                      |  60 ++++++
+ src/components/wayline/RouteEditor.vue  |   2 +-
+ src/components/wayline/RoutePlanner.vue | 236 ++++++++++++++++++++++++
+ src/hooks/use-route-overlay.ts          |  32 +++-
+ src/locales/de.ts                       |  23 +++
+ src/pages/page-web/projects/wayline.vue |  45 ++++-
+ 6 files changed, 392 insertions(+), 6 deletions(-)
+ create mode 100644 src/components/wayline/RoutePlanner.vue
+
+diff --git a/src/api/mapping.ts b/src/api/mapping.ts
+index ff59870..9d815ec 100644
+--- a/src/api/mapping.ts
++++ b/src/api/mapping.ts
+@@ -143,6 +143,66 @@ export interface RouteParams {
+   overlap_h: number
+   overlap_w: number
+   speed: number
++  image_format?: string | null // thermal cameras: "visable", "ir", "visable,ir"
++}
++
++export type PlanLens = 'wide' | 'thermal' | 'ms'
++
++export interface PlanPreset {
++  label: string
++  lens: PlanLens
++  gsd_cm: number
++  height: number
++  overlap_h: number
++  overlap_w: number
++  max_speed: number
++  image_format: string | null
++  hint: string
++}
++
++export interface PlanInfo {
++  id: string
++  name: string
++  camera: string
++  payload_key: string
++  params: RouteParams
++  polygon: [number, number][] | null
++  image_format: string | null
++  lenses: { key: PlanLens, label: string, gsd_cm_per_10m: number, width_px: number, height_px: number }[]
++  presets: Record<string, PlanPreset>
++  image_formats: string[]
++  legal_max_height: number
++  shot_interval_s: number
++}
++
++export interface PlanPreviewResult {
++  gsd_cm: number
++  footprint_m: [number, number]
++  line_spacing_m: number
++  lines: [[number, number], [number, number]][]
++  line_count: number
++  length_m: number
++  area_ha: number
++  duration_min: number
++  photos: number
++  warnings: string[]
++}
++
++export interface PlanTemplate { id: string, name: string, camera: string, drone_model_key: string, payload_key: string }
++
++export async function getPlanTemplates (): Promise<PlanTemplate[]> {
++  return (await http.get('/api/mapping/waylines/templates')).data
++}
++
++export async function getPlanInfo (waylineId: string): Promise<PlanInfo> {
++  return (await http.get(`/api/mapping/waylines/${waylineId}/plan-info`)).data
++}
++
++export async function planPreview (waylineId: string, body: {
++  polygon: [number, number][], lens: PlanLens, height: number, overlap_h: number, overlap_w: number,
++  direction: number, speed: number, margin: number
++}): Promise<PlanPreviewResult> {
++  return (await http.post(`/api/mapping/waylines/${waylineId}/plan-preview`, body)).data
+ }
+ 
+ export interface RouteGeometry {
+diff --git a/src/components/wayline/RouteEditor.vue b/src/components/wayline/RouteEditor.vue
+index f2844ec..f7c3146 100644
+--- a/src/components/wayline/RouteEditor.vue
++++ b/src/components/wayline/RouteEditor.vue
+@@ -1,6 +1,6 @@
+ <template>
+   <teleport to="body">
+-  <div class="route-editor" v-if="routeState.route">
++  <div class="route-editor" v-if="routeState.route && !routeState.planning">
+     <div class="head">
+       <span class="title" :title="routeState.route.name">{{ routeState.route.name }}</span>
+       <a @click="close"><CloseOutlined /></a>
+diff --git a/src/components/wayline/RoutePlanner.vue b/src/components/wayline/RoutePlanner.vue
+new file mode 100644
+index 0000000..0417c9c
+--- /dev/null
++++ b/src/components/wayline/RoutePlanner.vue
+@@ -0,0 +1,236 @@
++<template>
++  <teleport to="body">
++  <div class="route-planner" v-if="routeState.planning && info">
++    <div class="head">
++      <span class="title">{{ $t('New area route') }}</span>
++      <a @click="close"><CloseOutlined /></a>
++    </div>
++    <div class="meta">{{ $t('Template') }}: {{ info.name }} ({{ info.camera }})</div>
++    <div class="hint">
++      {{ $t('Drag the corners onto the area, click a small dot to add a corner, right-click a corner to delete it. The orange line is a preview; Pilot 2 computes the final route.') }}
++    </div>
++
++    <a-form layout="horizontal" :label-col="{ span: 11 }" :wrapper-col="{ span: 13 }" class="form">
++      <a-form-item :label="$t('Name')">
++        <a-input v-model:value="form.name" size="small" :maxlength="60" />
++      </a-form-item>
++      <a-form-item :label="$t('Purpose')">
++        <a-select v-model:value="form.preset" size="small" @change="applyPreset">
++          <a-select-option v-for="(p, k) in info.presets" :key="k" :value="k">{{ p.label }}</a-select-option>
++          <a-select-option value="custom">{{ $t('Custom') }}</a-select-option>
++        </a-select>
++      </a-form-item>
++      <a-form-item :label="$t('Camera for resolution')">
++        <a-select v-model:value="form.lens" size="small" @change="fromGsd">
++          <a-select-option v-for="l in info.lenses" :key="l.key" :value="l.key">{{ l.label }}</a-select-option>
++        </a-select>
++      </a-form-item>
++      <a-form-item :label="$t('Resolution (cm/px)')">
++        <a-input-number v-model:value="form.gsd" size="small" :min="0.3" :max="30" :step="0.1" @change="fromGsd" />
++      </a-form-item>
++      <a-form-item :label="$t('Height (m)')">
++        <a-input-number v-model:value="form.height" size="small" :min="10" :max="500" :step="1" @change="fromHeight" />
++      </a-form-item>
++      <a-form-item :label="$t('Overlap along (%)')">
++        <a-input-number v-model:value="form.overlap_h" size="small" :min="10" :max="90" :step="5" />
++      </a-form-item>
++      <a-form-item :label="$t('Overlap across (%)')">
++        <a-input-number v-model:value="form.overlap_w" size="small" :min="10" :max="90" :step="5" />
++      </a-form-item>
++      <a-form-item :label="$t('Direction (deg)')">
++        <a-input-number v-model:value="form.direction" size="small" :min="0" :max="359" :step="1" />
++        <a class="inline" :title="$t('Fly along the longest edge (fewer turns)')" @click="alongLongestEdge">{{ $t('longest edge') }}</a>
++      </a-form-item>
++      <a-form-item :label="$t('Speed (m/s)')">
++        <a-input-number v-model:value="form.speed" size="small" :min="1" :max="15" :step="0.1" />
++        <a class="inline" :title="$t('Fastest speed that keeps the overlap at one photo every {0} s', info.shot_interval_s)" @click="autoSpeed">{{ $t('auto') }}</a>
++      </a-form-item>
++      <a-form-item :label="$t('Margin (m)')">
++        <a-input-number v-model:value="form.margin" size="small" :min="0" :max="200" :step="1" />
++      </a-form-item>
++      <a-form-item v-if="info.image_formats.length" :label="$t('Photos')">
++        <a-select v-model:value="form.image_format" size="small">
++          <a-select-option value="visable,ir">{{ $t('Wide + thermal') }}</a-select-option>
++          <a-select-option value="ir">{{ $t('Thermal only') }}</a-select-option>
++          <a-select-option value="visable">{{ $t('Wide only') }}</a-select-option>
++        </a-select>
++      </a-form-item>
++    </a-form>
++
++    <div v-if="preview" class="stats">
++      <div><b>{{ preview.area_ha.toFixed(2) }} ha</b> &#183; {{ preview.gsd_cm.toFixed(1) }} cm/px &#183; {{ $t('{0} lines', preview.line_count) }}</div>
++      <div>{{ (preview.length_m / 1000).toFixed(2) }} km &#183; ~{{ Math.ceil(preview.duration_min) }} min &#183; ~{{ preview.photos }} {{ $t('photos') }}</div>
++      <div class="sub">{{ $t('Photo {0} x {1} m, line spacing {2} m', preview.footprint_m[0], preview.footprint_m[1], preview.line_spacing_m) }}</div>
++      <div v-for="w in preview.warnings" :key="w" class="warn">{{ w }}</div>
++    </div>
++    <div v-if="previewError" class="warn">{{ previewError }}</div>
++    <div v-if="presetHint" class="hint">{{ presetHint }}</div>
++    <div class="hint warn">{{ $t('Check the route in Pilot 2 before flying.') }}</div>
++    <div class="buttons">
++      <a-button size="small" @click="close">{{ $t('Cancel') }}</a-button>
++      <a-button size="small" type="primary" :loading="saving" :disabled="!form.name.trim() || !preview" @click="save">{{ $t('Save route') }}</a-button>
++    </div>
++  </div>
++  </teleport>
++</template>
++
++<script lang="ts" setup>
++import { t } from '/@/locales'
++import { computed, defineEmits, reactive, ref, watch } from 'vue'
++import { message } from 'ant-design-vue'
++import { CloseOutlined } from '@ant-design/icons-vue'
++import { PlanInfo, PlanLens, PlanPreviewResult, copyRoute, planPreview } from '/@/api/mapping'
++import { routeState, useRouteOverlay } from '/@/hooks/use-route-overlay'
++import { getRoot } from '/@/root'
++
++const emit = defineEmits<{ (e: 'saved'): void }>()
++const { clear, startPlan, showPlanLines } = useRouteOverlay()
++const info = ref<PlanInfo | null>(null)
++const preview = ref<PlanPreviewResult | null>(null)
++const previewError = ref('')
++const saving = ref(false)
++const form = reactive({
++  name: '', preset: 'custom', lens: 'wide' as PlanLens, gsd: 2, height: 60, overlap_h: 80, overlap_w: 70,
++  direction: 0, speed: 8, margin: 0, image_format: null as string | null,
++})
++
++const lensFactor = computed(() => (info.value?.lenses.find(l => l.key === form.lens)?.gsd_cm_per_10m ?? 0.27) / 10)
++const presetHint = computed(() => info.value?.presets[form.preset]?.hint || '')
++
++function round1 (v: number) { return Math.round(v * 10) / 10 }
++function fromGsd () { form.height = round1(form.gsd / lensFactor.value) }
++function fromHeight () { form.gsd = Math.round(form.height * lensFactor.value * 100) / 100 }
++
++function applyPreset () {
++  const p = info.value?.presets[form.preset]
++  if (!p) return
++  Object.assign(form, { lens: p.lens, gsd: p.gsd_cm, height: p.height, overlap_h: p.overlap_h, overlap_w: p.overlap_w })
++  if (p.image_format && info.value?.image_formats.includes(p.image_format)) form.image_format = p.image_format
++  autoSpeed(p.max_speed)
++}
++
++function autoSpeed (cap?: number) {
++  // along-track photo footprint shrinks with the overlap; one photo per shot interval
++  const lens = info.value?.lenses.find(l => l.key === form.lens)
++  if (!lens || !info.value) return
++  const along = form.height * lensFactor.value / 100 * lens.height_px      // m on the ground along track
++  const max = typeof cap === 'number' ? cap : (info.value.presets[form.preset]?.max_speed ?? 12)
++  form.speed = Math.max(1, round1(Math.min(max, along * (1 - form.overlap_h / 100) / info.value.shot_interval_s)))
++}
++
++function alongLongestEdge () {
++  const poly = routeState.polygon
++  let best = -1
++  poly.forEach((p, i) => {
++    const q = poly[(i + 1) % poly.length]
++    const dx = (q[0] - p[0]) * Math.cos(p[1] * Math.PI / 180)
++    const dy = q[1] - p[1]
++    const d = Math.hypot(dx, dy)
++    if (d > best) {
++      best = d
++      form.direction = Math.round(((Math.atan2(dx, dy) * 180 / Math.PI) + 360) % 180)
++    }
++  })
++}
++
++/** Start planning from a template: rectangle of about 150 x 100 m at the map centre. */
++function open (plan: PlanInfo) {
++  info.value = plan
++  const c = getRoot()?.$map?.leaflet?.getCenter()
++  const lat = c ? c.lat : 51.16
++  const lon = c ? c.lng : 10.45
++  const dx = 75 / (111320 * Math.cos(lat * Math.PI / 180))
++  const dy = 50 / 111320
++  const poly: [number, number][] = [[lon - dx, lat - dy], [lon + dx, lat - dy], [lon + dx, lat + dy], [lon - dx, lat + dy]]
++  const stamp = new Date().toISOString().slice(0, 10)
++  Object.assign(form, {
++    name: `Plan ${stamp}`, preset: Object.keys(plan.presets)[0] || 'custom', margin: 0,
++    image_format: plan.image_format, direction: 0,
++  })
++  startPlan({
++    id: plan.id, name: plan.name, drone_model_key: '', template_type: 'mapping2d', editable: true, polygon: poly,
++    params: { ...plan.params, height_mode: null, surface_follow: false }, flight_path: [],
++  }, poly)
++  applyPreset()
++  alongLongestEdge()
++  refresh()
++}
++defineExpose({ open })
++
++let timer: number | undefined
++function refresh () {
++  window.clearTimeout(timer)
++  timer = window.setTimeout(async () => {
++    if (!info.value || !routeState.planning) return
++    try {
++      preview.value = await planPreview(info.value.id, {
++        polygon: routeState.polygon, lens: form.lens, height: form.height, overlap_h: form.overlap_h,
++        overlap_w: form.overlap_w, direction: form.direction, speed: form.speed, margin: form.margin,
++      })
++      previewError.value = ''
++      showPlanLines(preview.value.lines)
++    } catch (e: any) {
++      const d = e?.response?.data?.detail
++      previewError.value = Array.isArray(d) ? d.map((x: any) => x.msg).join('; ') : (d || String(e))
++      preview.value = null
++    }
++  }, 300)
++}
++watch(() => [form.lens, form.height, form.overlap_h, form.overlap_w, form.direction, form.speed, form.margin], refresh)
++watch(() => routeState.polygon.map(p => p.join(',')).join(';'), refresh)
++
++function close () {
++  clear()
++  info.value = null
++  preview.value = null
++}
++
++async function save () {
++  saving.value = true
++  try {
++    const result = await copyRoute(info.value!.id, {
++      name: form.name.trim(),
++      polygon: routeState.polygon,
++      params: {
++        height: form.height, direction: form.direction % 360, margin: form.margin, overlap_h: form.overlap_h,
++        overlap_w: form.overlap_w, speed: form.speed, image_format: info.value!.image_formats.length ? form.image_format : null,
++      },
++    })
++    message.success(t('Saved as new route "{0}". Pilot 2 syncs it into its library.', result.name))
++    close()
++    emit('saved')
++  } catch (e: any) {
++    const detail = e?.response?.data?.detail
++    const text = Array.isArray(detail) ? detail.map((d: any) => d.msg).join('; ') : (detail || String(e))
++    message.error(t('Saving failed: ') + text, 8)
++  } finally {
++    saving.value = false
++  }
++}
++</script>
++
++<style lang="scss" scoped>
++.route-planner {
++  position: fixed;
++  z-index: 1000;
++  left: 0;
++  top: 10px;
++  margin-left: 345px;
++  width: 360px;
++  max-height: calc(100vh - 20px);
++  overflow-y: auto;
++  background: #232323;
++  color: #fff;
++  border-radius: 4px;
++  padding: 10px 12px;
++  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.5);
++}
++.head { display: flex; justify-content: space-between; align-items: center; font-weight: 600; a { color: #fff; } }
++.meta { color: #aaa; font-size: 12px; margin: 4px 0; }
++.hint { color: #888; font-size: 12px; margin: 6px 0; }
++.warn { color: #faad14; font-size: 12px; }
++.form { margin-top: 6px; :deep(.ant-form-item) { margin-bottom: 4px; } :deep(.ant-form-item-label > label) { color: #ddd; font-size: 12px; } }
++.inline { margin-left: 8px; font-size: 12px; }
++.stats { background: #2d3442; border-radius: 3px; padding: 6px 8px; margin: 8px 0; font-size: 13px; .sub { color: #aaa; font-size: 12px; } }
++.buttons { display: flex; justify-content: flex-end; gap: 8px; margin-top: 8px; }
++</style>
+diff --git a/src/hooks/use-route-overlay.ts b/src/hooks/use-route-overlay.ts
+index d479359..e5a3ae9 100644
+--- a/src/hooks/use-route-overlay.ts
++++ b/src/hooks/use-route-overlay.ts
+@@ -7,9 +7,10 @@ import { RouteGeometry } from '/@/api/mapping'
+ 
+ type LonLat = [number, number]
+ 
+-export const routeState = reactive<{ route: RouteGeometry | null, editing: boolean, polygon: LonLat[] }>({
++export const routeState = reactive<{ route: RouteGeometry | null, editing: boolean, planning: boolean, polygon: LonLat[] }>({
+   route: null,
+   editing: false,
++  planning: false, // new route from a template (RoutePlanner), not an edited copy
+   polygon: [],
+ })
+ 
+@@ -17,6 +18,7 @@ let group: L.LayerGroup | null = null
+ let areaLayer: L.Polygon | null = null
+ let pathLayer: L.Polyline | null = null
+ let handles: L.LayerGroup | null = null
++let planLines: L.LayerGroup | null = null
+ 
+ function map (): L.Map | undefined {
+   return getRoot()?.$map?.leaflet
+@@ -73,9 +75,10 @@ function rebuildHandles () {
+ export function useRouteOverlay () {
+   function clear () {
+     group?.remove()
+-    group = areaLayer = pathLayer = handles = null
++    group = areaLayer = pathLayer = handles = planLines = null
+     routeState.route = null
+     routeState.editing = false
++    routeState.planning = false
+     routeState.polygon = []
+   }
+ 
+@@ -116,5 +119,28 @@ export function useRouteOverlay () {
+     if (route) show(route, false)
+   }
+ 
+-  return { show, clear, startEdit, cancelEdit }
++  /** New area route: editable polygon (no flight path yet), preview lines drawn by showPlanLines. */
++  function startPlan (route: RouteGeometry, polygon: LonLat[]) {
++    const m = map()
++    if (!m) return
++    show({ ...route, polygon, flight_path: [], editable: true }, false)
++    routeState.planning = true
++    planLines = L.layerGroup().addTo(group as L.LayerGroup)
++    startEdit()
++    if (areaLayer) m.fitBounds(areaLayer.getBounds(), { padding: [80, 80], maxZoom: 18 })
++  }
++
++  function showPlanLines (lines: [[number, number], [number, number]][]) {
++    if (!planLines) return
++    planLines.clearLayers()
++    const pts: L.LatLngExpression[] = []
++    lines.forEach(seg => { pts.push(toLatLng(seg[0]), toLatLng(seg[1])) })
++    if (pts.length) {
++      planLines.addLayer(L.polyline(pts, { color: '#ff9900', weight: 2, dashArray: '6 4', interactive: false }))
++      planLines.addLayer(L.circleMarker(pts[0], { radius: 6, color: '#fff', fillColor: '#19be6b', fillOpacity: 1, weight: 2 })
++        .bindTooltip('Start (preview)'))
++    }
++  }
++
++  return { show, clear, startEdit, cancelEdit, startPlan, showPlanLines }
+ }
+diff --git a/src/locales/de.ts b/src/locales/de.ts
+index 0ef7e7c..ddfcc0f 100644
+--- a/src/locales/de.ts
++++ b/src/locales/de.ts
+@@ -594,4 +594,27 @@ export default {
+   "{0} anomalies": "{0} Anomalien",
+   "{0} anomalies without position (no GPS)": "{0} Anomalien ohne Position (kein GPS)",
+   "{0} of {1} images analysed": "{0} von {1} Bildern ausgewertet",
++  "Camera for resolution": "Kamera für Auflösung",
++  "Check the route in Pilot 2 before flying.": "Die Route vor dem Flug in Pilot 2 prüfen.",
++  "Choose a template: an area route created in Pilot 2 for the drone and camera you will fly with. The new route takes over its camera and settings.": "Vorlage wählen: eine in Pilot 2 angelegte Flächenroute für die Drohne und Kamera, mit der geflogen wird. Die neue Route übernimmt deren Kamera und Einstellungen.",
++  "Custom": "Eigene Werte",
++  "Drag the corners onto the area, click a small dot to add a corner, right-click a corner to delete it. The orange line is a preview; Pilot 2 computes the final route.": "Ecken auf die Fläche ziehen, kleiner Punkt fügt eine Ecke hinzu, Rechtsklick löscht eine Ecke. Die orange Linie ist eine Vorschau; die endgültige Route berechnet Pilot 2.",
++  "Fastest speed that keeps the overlap at one photo every {0} s": "Höchste Geschwindigkeit, bei der die Überlappung mit einem Foto alle {0} s erhalten bleibt",
++  "Fly along the longest edge (fewer turns)": "Entlang der längsten Kante fliegen (weniger Wenden)",
++  "New area route": "Neue Flächenroute",
++  "No area route yet: create one in Pilot 2 (Create route, Area route) for this drone first.": "Noch keine Flächenroute: zuerst in Pilot 2 eine anlegen (Route erstellen, Flächenroute) für diese Drohne.",
++  "Photo {0} x {1} m, line spacing {2} m": "Foto {0} × {1} m, Bahnabstand {2} m",
++  "Photos": "Fotos",
++  "Plan a new area route": "Neue Flächenroute planen",
++  "Purpose": "Zweck",
++  "Resolution (cm/px)": "Bodenauflösung (cm/px)",
++  "Save route": "Route speichern",
++  "Template": "Vorlage",
++  "Thermal only": "Nur Wärmebild",
++  "Wide + thermal": "Weitwinkel + Wärmebild",
++  "Wide only": "Nur Weitwinkel",
++  "auto": "automatisch",
++  "longest edge": "längste Kante",
++  "photos": "Fotos",
++  "{0} lines": "{0} Bahnen",
+ } as Record<string, string>
+diff --git a/src/pages/page-web/projects/wayline.vue b/src/pages/page-web/projects/wayline.vue
+index 0251e47..ab18ffe 100644
+--- a/src/pages/page-web/projects/wayline.vue
++++ b/src/pages/page-web/projects/wayline.vue
+@@ -6,6 +6,9 @@
+         <a-col :span="1"></a-col>
+         <a-col :span="15">{{ $t('Flight Route Library') }}</a-col>
+         <a-col :span="8" v-if="importVisible" class="flex-row flex-justify-end flex-align-center">
++          <a-tooltip :title="$t('Plan a new area route')">
++            <a-button type="text" style="color: white;" @click="openPlanTemplates"><PlusOutlined /></a-button>
++          </a-tooltip>
+           <a-upload
+             name="file"
+             :multiple="false"
+@@ -81,6 +84,16 @@
+     </div>
+     </a-spin>
+     <RouteEditor v-if="importVisible" @saved="reloadWaylines" />
++    <RoutePlanner v-if="importVisible" ref="planner" @saved="reloadWaylines" />
++    <a-modal v-model:visible="templatesVisible" :title="$t('Plan a new area route')" :footer="null" width="520px">
++      <div class="plan-hint">{{ $t('Choose a template: an area route created in Pilot 2 for the drone and camera you will fly with. The new route takes over its camera and settings.') }}</div>
++      <a-spin :spinning="templatesLoading">
++        <div v-if="!templatesLoading && !planTemplates.length" class="plan-hint">{{ $t('No area route yet: create one in Pilot 2 (Create route, Area route) for this drone first.') }}</div>
++        <div v-for="tpl in planTemplates" :key="tpl.id" class="plan-template" @click="startPlanning(tpl)">
++          <b>{{ tpl.name }}</b> <span class="cam">{{ tpl.camera }}</span>
++        </div>
++      </a-spin>
++    </a-modal>
+   </div>
+ </template>
+ 
+@@ -91,7 +104,7 @@ import { message } from 'ant-design-vue'
+ import { onMounted, onUnmounted, onUpdated, ref } from 'vue'
+ import { deleteWaylineFile, downloadWaylineFile, getWaylineFiles, importKmzFile } from '/@/api/wayline'
+ import { ELocalStorageKey, ERouterName } from '/@/types'
+-import { EllipsisOutlined, RocketOutlined, CameraFilled, UserOutlined, SelectOutlined } from '@ant-design/icons-vue'
++import { EllipsisOutlined, RocketOutlined, CameraFilled, UserOutlined, SelectOutlined, PlusOutlined } from '@ant-design/icons-vue'
+ import { DEVICE_NAME } from '/@/types/device'
+ import { useMyStore } from '/@/store'
+ import { WaylineFile } from '/@/types/wayline'
+@@ -100,7 +113,8 @@ import { IPage } from '/@/api/http/type'
+ import { CURRENT_CONFIG } from '/@/api/http/config'
+ import { getRoot } from '/@/root'
+ import RouteEditor from '/@/components/wayline/RouteEditor.vue'
+-import { getRouteGeometry } from '/@/api/mapping'
++import RoutePlanner from '/@/components/wayline/RoutePlanner.vue'
++import { PlanTemplate, getPlanInfo, getPlanTemplates, getRouteGeometry } from '/@/api/mapping'
+ import { useRouteOverlay } from '/@/hooks/use-route-overlay'
+ 
+ const loading = ref(false)
+@@ -208,6 +222,31 @@ async function showOnMap (wayline: WaylineFile) {
+     message.error(t('Route cannot be shown: mapping service not reachable or file unreadable'))
+   }
+ }
++// onprem: plan a new area route from a Pilot 2 template (RoutePlanner)
++const planner = ref<InstanceType<typeof RoutePlanner> | null>(null)
++const templatesVisible = ref(false)
++const templatesLoading = ref(false)
++const planTemplates = ref<PlanTemplate[]>([])
++async function openPlanTemplates () {
++  templatesVisible.value = true
++  templatesLoading.value = true
++  try {
++    planTemplates.value = await getPlanTemplates()
++  } catch (e) {
++    message.error(t('Mapping service not reachable'))
++  } finally {
++    templatesLoading.value = false
++  }
++}
++async function startPlanning (tpl: PlanTemplate) {
++  try {
++    const info = await getPlanInfo(tpl.id)
++    templatesVisible.value = false
++    planner.value?.open(info)
++  } catch (e: any) {
++    message.error(t('Saving failed: ') + (e?.response?.data?.detail || String(e)))
++  }
++}
+ function reloadWaylines () {
+   canRefresh.value = true
+   pagination.total = 0
+@@ -291,4 +330,6 @@ const uploadFile = async () => {
+   scrollbar-width: thin;
+   scrollbar-color: #c5c8cc transparent;
+ }
++.plan-hint { color: #888; font-size: 12px; margin-bottom: 8px; }
++.plan-template { padding: 8px; border-bottom: 1px solid #eee; cursor: pointer; &:hover { background: #f0f5ff; } .cam { color: #888; margin-left: 8px; } }
+ </style>
+-- 
+2.47.3
+

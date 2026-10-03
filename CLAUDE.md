@@ -77,6 +77,10 @@ Editing routes (mapping-tool/service/app/wpml.py, verified with Pilot 2 on RC Pr
   in Somalia). Edit values as text only, keep declaration, indentation and number style.
 - Height change of a web-edited copy (globalShootHeight/height/surfaceRelativeHeight, ellipsoidHeight shifted)
   accepted by Pilot 2 on RC Pro (verified 2026-10-03).
+- Flight planning (app/planner.py, web patch 0022): a new area route = edit_copy of a Pilot 2 mapping2d template
+  of the same drone/camera (never build template.kml from scratch). Camera table per payload type (66/67/68/88/89)
+  with GSD factors from DJI specs; presets pv_thermal / multispectral / ortho; imageFormat only for thermal cameras.
+  The preview lines are an estimate, Pilot 2 computes the executable route.
 
 ## Build notes
 - MySQL 8.4 LTS (upgraded in place from 8.0.39 on 2026-10-02, 8.0 is EOL). All users use caching_sha2_password;

@@ -12,9 +12,9 @@ from fastapi.responses import RedirectResponse
 from . import db
 from .auth import User, agent_dependency, tile_user_dependency, user_dependency
 from .config import Settings
-from .models import PROFILES, MetaRequest, Claim, Complete, Fail, Heartbeat, JobCreate, RouteCopy, UploadUrls, AgentRef
+from .models import PROFILES, MetaRequest, Claim, Complete, Fail, Heartbeat, JobCreate, PlanPreview, RouteCopy, UploadUrls, AgentRef
 from .storage import Storage
-from . import mediameta, thumbs, wpml
+from . import mediameta, planner, thumbs, wpml
 from concurrent.futures import ThreadPoolExecutor
 
 log = logging.getLogger("mapping.api")
@@ -341,7 +341,8 @@ def build_router(settings: Settings, storage: Storage) -> APIRouter:
         conn = db.connect(settings, settings.media_database)
         try:
             with conn.cursor() as cur:
-                cur.execute("SELECT wayline_id, name, object_key, template_types, drone_model_key FROM wayline_file"
+                cur.execute("SELECT wayline_id, name, object_key, template_types, drone_model_key, payload_model_keys"
+                            " FROM wayline_file"
                             " WHERE workspace_id = %s AND wayline_id = %s", (user.workspace_id, wayline_id))
                 row = cur.fetchone()
         finally:
@@ -358,6 +359,28 @@ def build_router(settings: Settings, storage: Storage) -> APIRouter:
             resp.close()
             resp.release_conn()
 
+    @router.get("/waylines/templates")
+    def plan_templates(user: User = Depends(current_user)) -> list[dict]:
+        """Area routes (mapping2d, template type 1) usable as planning templates, newest first."""
+        conn = db.connect(settings, settings.media_database)
+        try:
+            with conn.cursor() as cur:
+                cur.execute("SELECT wayline_id, name, drone_model_key, payload_model_keys FROM wayline_file"
+                            " WHERE workspace_id = %s AND FIND_IN_SET('1', template_types) ORDER BY update_time DESC",
+                            (user.workspace_id,))
+                rows = cur.fetchall()
+        finally:
+            conn.close()
+        out = []
+        for r in rows:
+            try:
+                cam = planner.camera(payload_key(r))[0]
+            except planner.PlanError:
+                continue
+            out.append({"id": r["wayline_id"], "name": r["name"], "camera": cam,
+                        "drone_model_key": r["drone_model_key"], "payload_key": payload_key(r)})
+        return out
+
     @router.get("/waylines/{wayline_id}")
     def get_wayline(wayline_id: str, user: User = Depends(current_user)) -> dict:
         row = wayline_row(user, wayline_id)
@@ -371,6 +394,44 @@ def build_router(settings: Settings, storage: Storage) -> APIRouter:
             "editable": route.template_type in wpml.EDITABLE_TYPES and route.polygon is not None,
             "polygon": route.polygon, "params": route.params, "flight_path": route.flight_path,
         }
+
+    def payload_key(row: dict) -> str | None:
+        keys = (row.get("payload_model_keys") or "").split(",")
+        return keys[0].strip() or None
+
+    @router.get("/waylines/{wayline_id}/plan-info")
+    def plan_info(wayline_id: str, user: User = Depends(current_user)) -> dict:
+        """Camera, lenses and purpose presets for planning a new area route from this template."""
+        row = wayline_row(user, wayline_id)
+        try:
+            route = wpml.parse(load_kmz(row))
+            name, lenses = planner.camera(payload_key(row))
+        except (wpml.WpmlError, planner.PlanError) as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+        if route.template_type not in wpml.EDITABLE_TYPES:
+            raise HTTPException(status_code=422, detail="Vorlage muss eine Fl\u00e4chenroute (mapping2d) sein")
+        return {
+            "id": row["wayline_id"], "name": row["name"], "camera": name, "payload_key": payload_key(row),
+            "drone_model_key": row["drone_model_key"], "params": route.params, "polygon": route.polygon,
+            "image_format": route.image_format,
+            "lenses": [{"key": ln.key, "label": ln.label, "gsd_cm_per_10m": round(ln.gsd_per_m * 1000, 4),
+                        "width_px": ln.width_px, "height_px": ln.height_px} for ln in lenses],
+            "presets": {k: {**v, "height": round(planner.height_for_gsd(planner.lens(payload_key(row), v["lens"]), v["gsd_cm"]), 1)}
+                        for k, v in planner.presets_for(payload_key(row)).items()},
+            # selectable photo lenses only for thermal cameras whose template has the imageFormat tag
+            "image_formats": list(planner.IMAGE_FORMATS)
+            if route.image_format and any(ln.key == "thermal" for ln in lenses) else [],
+            "legal_max_height": planner.LEGAL_MAX_HEIGHT, "shot_interval_s": planner.SHOT_INTERVAL_S,
+        }
+
+    @router.post("/waylines/{wayline_id}/plan-preview")
+    def plan_preview(wayline_id: str, body: PlanPreview, user: User = Depends(current_user)) -> dict:
+        row = wayline_row(user, wayline_id)
+        try:
+            return planner.preview(body.polygon, payload_key(row), body.lens, body.height, body.overlap_h,
+                                   body.overlap_w, body.direction, body.speed, body.margin)
+        except planner.PlanError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
 
     @router.post("/waylines/{wayline_id}/copy", status_code=201)
     def copy_wayline(wayline_id: str, body: RouteCopy, user: User = Depends(current_user),

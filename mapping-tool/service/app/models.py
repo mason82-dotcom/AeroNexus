@@ -139,6 +139,7 @@ class RouteParams(BaseModel):
     overlap_h: int = Field(ge=10, le=90)            # %, along track
     overlap_w: int = Field(ge=10, le=90)            # %, across track
     speed: float = Field(ge=1, le=15)               # m/s
+    image_format: str | None = Field(default=None, pattern=r"^(visable|ir|visable,ir)$")  # thermal cameras
 
 
 class RouteCopy(BaseModel):
@@ -173,3 +174,14 @@ class RouteCopy(BaseModel):
                 if _segments_cross(poly[i], poly[(i + 1) % n], poly[j], poly[(j + 1) % n]):
                     raise ValueError("polygon edges intersect")
         return poly
+
+
+class PlanPreview(BaseModel):
+    polygon: list[list[float]] = Field(min_length=3, max_length=100)
+    lens: str = Field(pattern=r"^(wide|thermal|ms)$")
+    height: float = Field(ge=10, le=500)
+    overlap_h: int = Field(ge=10, le=90)
+    overlap_w: int = Field(ge=10, le=90)
+    direction: int = Field(ge=0, le=359)
+    speed: float = Field(ge=1, le=15)
+    margin: int = Field(default=0, ge=0, le=200)

@@ -30,6 +30,7 @@ class Route:
     polygon: list[list[float]] | None   # [[lon, lat], ...] without closing point
     params: dict
     flight_path: list[list[float]]      # [[lon, lat, height], ...] from waylines.wpml
+    image_format: str | None = None     # photo lenses ("visable", "ir", "visable,ir", ...)
 
 
 def _read_zip(kmz: bytes) -> dict[str, bytes]:
@@ -108,7 +109,9 @@ def parse(kmz: bytes) -> Route:
             lon, lat = coords.text.strip().split(",")[:2]
             height = _num(placemark, ns, "executeHeight")
             path.append([float(lon), float(lat), height if height is not None else 0.0])
-    return Route(template_type=template_type, wpml_ns=ns, polygon=polygon, params=params, flight_path=path)
+    fmt = _find(root, ns, "imageFormat")
+    return Route(template_type=template_type, wpml_ns=ns, polygon=polygon, params=params, flight_path=path,
+                 image_format=(fmt.text or "").strip() if fmt is not None else None)
 
 
 def _fmt(value: float, digits: int = 6) -> str:
@@ -185,6 +188,11 @@ def edit_copy(kmz: bytes, polygon: list[list[float]], params: dict) -> bytes:
                       ("orthoLidarOverlapH", "overlap_h"), ("orthoLidarOverlapW", "overlap_w")):
         text = _replace_if_changed(text, prefix, name, _num(root, ns, name), params[key], 0)
     text = _replace_if_changed(text, prefix, "autoFlightSpeed", _num(root, ns, "autoFlightSpeed"), params["speed"], 3)
+    if params.get("image_format"):
+        # photo lenses of a thermal camera ("visable", "ir", "visable,ir"); only where the template has the tag
+        if _find(root, ns, "imageFormat") is None:
+            raise WpmlError("Vorlage hat kein Bildformat (imageFormat)")
+        text = _replace_value(text, prefix, "imageFormat", params["image_format"])
     now = str(int(time.time() * 1000))
     text = _replace_value(text, prefix, "createTime", now)
     text = _replace_value(text, prefix, "updateTime", now)

@@ -64,6 +64,7 @@ Bisherige Patches:
 - **control 0019:** Agora-SDK wird erst beim Öffnen des Agora-Players geladen (keine Konsolenfehler, Hauptpaket 1,2 MB kleiner)
 - **control 0020:** Offline-Karte (Vektorkarte als PMTiles, protomaps-leaflet) als Standard-Ebene
 - **control 0021:** Seite Photovoltaik: Inspektionen, Hotspots auf der Karte, Bildausschnitte, Status, Bericht/CSV/GeoJSON
+- **control 0022:** Flugplanung: neue Flächenroute aus einer Pilot-Vorlage (Zweck, Bodenauflösung, Vorschau der Bahnen)
 
 Prüfen, ob die Patches vollständig sind und sauber auf die gepinnten Commits passen: `edge/verify-patches.sh`
 
