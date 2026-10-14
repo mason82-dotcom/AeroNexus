@@ -24,33 +24,44 @@ grep -q "change-me" .env && echo "WARNING: .env still contains change-me values"
 clone_and_patch () {  # dir repo commit patchdir
   local dir=$1 repo=$2 commit=$3 patches=$4
   if [ -d "$dir/.git" ]; then
-    # Existing upstream trees may already contain patches as commits or working-tree
-    # changes. Never reset, clean, or overwrite user changes.
-    local patch
-    local -a missing=()
+    # Existing clones must never be reset, cleaned, or patched implicitly.
+    # Compare the ordered commit subjects with the patch mail subjects.
+    # This verifies the current pinned patch series without changing files.
+    local -a patch_files=()
+    local patch subject commit_subject index=0
     for patch in "$patches"/*.patch; do
-      if git -C "$dir" apply --reverse --check "$patch" >/dev/null 2>&1; then
-        echo "== already applied: ${patch##*/}"
-      else
-        missing+=("$patch")
-      fi
+      [ -f "$patch" ] || { echo "ERROR: no patches in $patches" >&2; return 1; }
+      patch_files+=("$patch")
     done
-    if [ "${#missing[@]}" -eq 0 ]; then
-      echo "== $dir: all patches present"
-      return
-    fi
-    if [ -n "$(git -C "$dir" status --porcelain --untracked-files=no)" ]; then
-      echo "ERROR: $dir has tracked local changes and missing patches; refusing to modify it." >&2
-      echo "       Review and preserve local changes before applying patches manually." >&2
+    if ! git -C "$dir" merge-base --is-ancestor "$commit" HEAD; then
+      echo "ERROR: $dir does not descend from pinned upstream $commit" >&2
       return 1
     fi
-    # Verify the entire patch series on a temporary index/worktree copy first.
-    # Applying to the real tree is deliberately not automatic: patch ordering,
-    # existing commits and conflicts require maintainer review.
-    echo "ERROR: $dir has missing patches; refusing automatic patch application." >&2
-    printf '  missing: %s\n' "${missing[@]}" >&2
-    echo "       Apply them in order after reviewing upstream state." >&2
-    return 1
+    local count
+    count=$(git -C "$dir" rev-list --count "$commit..HEAD")
+    if [ "$count" -gt "${#patch_files[@]}" ]; then
+      echo "ERROR: $dir has $count commits, but only ${#patch_files[@]} patches; manual review required" >&2
+      return 1
+    fi
+    local -a commit_subjects=()
+    mapfile -t commit_subjects < <(git -C "$dir" log --reverse --format=%s "$commit..HEAD")
+    for patch in "${patch_files[@]}"; do
+      subject=$(sed -n 's/^Subject: \(\[PATCH[^]]*\] \)\?//p' "$patch" | head -n 1)
+      [ -n "$subject" ] || { echo "ERROR: no Subject in $patch" >&2; return 1; }
+      if [ "$index" -lt "$count" ]; then
+        commit_subject=${commit_subjects[$index]}
+        if [ "$subject" != "$commit_subject" ]; then
+          echo "ERROR: patch/commit mismatch at $patch: $subject != $commit_subject" >&2
+          return 1
+        fi
+      else
+        echo "ERROR: missing patch: $patch; apply manually after review" >&2
+        return 1
+      fi
+      index=$((index + 1))
+    done
+    echo "== $dir: verified $count ordered patch commits; no changes made"
+    return
   fi
   git clone -q "$repo" "$dir"
   git -C "$dir" checkout -q "$commit"
