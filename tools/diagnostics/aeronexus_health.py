@@ -120,6 +120,45 @@ def tsdk_check():
         return {"status": "error", "error": type(exc).__name__}
 
 
+
+def dji_connection_check():
+    """Read EMQX sessions without creating an MQTT client or changing state."""
+    command = ["docker", "exec", f"{PROJECT}-emqx-1",
+               "/opt/emqx/bin/emqx", "ctl", "clients", "list"]
+    try:
+        result = subprocess.run(
+            command, capture_output=True, text=True, timeout=10, check=True
+        )
+    except (OSError, subprocess.SubprocessError) as exc:
+        return {"status": "unknown", "reason": "client_list_unavailable",
+                "error": type(exc).__name__}
+
+    lines = [line for line in result.stdout.splitlines()
+             if line.startswith("Client(")]
+    clients = []
+    for line in lines:
+        if "connected=true" not in line:
+            continue
+        fields = line.split("username=", 1)
+        if len(fields) != 2:
+            return {"status": "unknown", "reason": "client_list_unparseable"}
+        clients.append(fields[1].split(",", 1)[0].split(")", 1)[0])
+    if not clients:
+        if lines:
+            return {"status": "unknown", "reason": "client_list_unparseable"}
+        return {"status": "ok", "connection": "offline",
+                "reason": "no_mqtt_clients", "mqtt_clients": 0}
+    non_backend = [name for name in clients if name != "onprem-backend"]
+    if non_backend:
+        return {"status": "unknown", "connection": "unverified",
+                "reason": "non_backend_clients_present",
+                "mqtt_clients": len(clients),
+                "non_backend_clients": len(non_backend)}
+    return {"status": "ok", "connection": "offline",
+            "reason": "only_backend_mqtt_clients",
+            "mqtt_clients": len(clients), "non_backend_clients": 0}
+
+
 def build_report():
     checks = {}
     try:
@@ -138,10 +177,7 @@ def build_report():
     for name, (host, port) in TCP.items():
         checks[f"tcp.{name}"] = tcp_check(host, port)
     checks["tsdk.sdk"] = tsdk_check()
-    checks["dji.connection"] = {
-        "status": "unknown",
-        "reason": "telemetry_probe_not_implemented",
-    }
+    checks["dji.connection"] = dji_connection_check()
     counts = {
         state: sum(item["status"] == state for item in checks.values())
         for state in ("ok", "warning", "error", "unknown")
