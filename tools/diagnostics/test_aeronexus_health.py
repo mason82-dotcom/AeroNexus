@@ -11,7 +11,8 @@ SPEC.loader.exec_module(health)
 
 
 class DiagnosticsTests(unittest.TestCase):
-    @patch.object(health, "tsdk_check", return_value={"status": "ok"})\n    @patch.object(health, "tcp_check", return_value={"status": "ok"})
+    @patch.object(health, "tsdk_check", return_value={"status": "ok"})
+    @patch.object(health, "tcp_check", return_value={"status": "ok"})
     @patch.object(health, "http_check", return_value={"status": "ok"})
     @patch.object(health, "docker_checks")
     def test_all_infrastructure_healthy(self, docker, http, tcp, tsdk):
@@ -24,6 +25,7 @@ class DiagnosticsTests(unittest.TestCase):
                          {"ok": 20, "warning": 0, "error": 0, "unknown": 1})
         self.assertEqual(report["checks"]["dji.connection"]["status"], "unknown")
 
+    @patch.object(health, "tsdk_check", return_value={"status": "ok"})
     @patch.object(health, "tcp_check", return_value={"status": "ok"})
     @patch.object(health, "http_check", return_value={"status": "ok"})
     @patch.object(health, "docker_checks", return_value={})
@@ -32,6 +34,7 @@ class DiagnosticsTests(unittest.TestCase):
         self.assertEqual(report["overall_status"], "error")
         self.assertEqual(report["summary"]["error"], 11)
 
+    @patch.object(health, "tsdk_check", return_value={"status": "ok"})
     @patch.object(health, "tcp_check", return_value={"status": "ok"})
     @patch.object(health, "http_check", return_value={"status": "ok"})
     @patch.object(health, "docker_checks")
