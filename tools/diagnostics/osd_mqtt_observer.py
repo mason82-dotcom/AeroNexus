@@ -52,6 +52,7 @@ def main(argv=None):
     client.username_pw_set(username, password)
     client.on_connect = adapter.on_connect
     client.on_disconnect = adapter.on_disconnect
+    client.on_subscribe = adapter.on_subscribe
     client.on_message = adapter.on_message
     try:
         client.connect(host, port, keepalive=30)
