@@ -163,6 +163,15 @@ def dji_connection_check():
             "mqtt_clients": len(clients), "non_backend_clients": 0}
 
 
+def dji_telemetry_check(connection):
+    """Do not infer OSD freshness from MQTT client sessions or message counters."""
+    if connection.get("connection") == "offline":
+        return {"status": "ok", "telemetry": "inactive",
+                "reason": "no_non_backend_mqtt_clients"}
+    return {"status": "unknown", "telemetry": "unverified",
+            "reason": "osd_freshness_probe_not_implemented"}
+
+
 def build_report():
     checks = {}
     try:
@@ -182,6 +191,7 @@ def build_report():
         checks[f"tcp.{name}"] = tcp_check(host, port)
     checks["tsdk.sdk"] = tsdk_check()
     checks["dji.connection"] = dji_connection_check()
+    checks["dji.telemetry"] = dji_telemetry_check(checks["dji.connection"])
     counts = {
         state: sum(item["status"] == state for item in checks.values())
         for state in ("ok", "warning", "error", "unknown")
