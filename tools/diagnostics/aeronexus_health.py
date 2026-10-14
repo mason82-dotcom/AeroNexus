@@ -133,13 +133,18 @@ def dji_connection_check():
         return {"status": "unknown", "reason": "client_list_unavailable",
                 "error": type(exc).__name__}
 
-    import re
-    clients = re.findall(
-        r"^Client\\([^\\n]*?username=([^,\\s)]+)[^\\n]*?connected=true",
-        result.stdout, re.MULTILINE,
-    )
+    lines = [line for line in result.stdout.splitlines()
+             if line.startswith("Client(")]
+    clients = []
+    for line in lines:
+        if "connected=true" not in line:
+            continue
+        fields = line.split("username=", 1)
+        if len(fields) != 2:
+            return {"status": "unknown", "reason": "client_list_unparseable"}
+        clients.append(fields[1].split(",", 1)[0].split(")", 1)[0])
     if not clients:
-        if "Client(" in result.stdout:
+        if lines:
             return {"status": "unknown", "reason": "client_list_unparseable"}
         return {"status": "ok", "connection": "offline",
                 "reason": "no_mqtt_clients", "mqtt_clients": 0}
