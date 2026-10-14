@@ -127,7 +127,7 @@ def dji_connection_check():
                "/opt/emqx/bin/emqx", "ctl", "clients", "list"]
     try:
         result = subprocess.run(
-            command, capture_output=True, text=True, timeout=10, check=True
+            command, capture_output=True, text=True, timeout=10, check=False
         )
     except (OSError, subprocess.SubprocessError) as exc:
         return {"status": "unknown", "reason": "client_list_unavailable",
@@ -144,10 +144,14 @@ def dji_connection_check():
             return {"status": "unknown", "reason": "client_list_unparseable"}
         clients.append(fields[1].split(",", 1)[0].split(")", 1)[0])
     if not clients:
+        if result.returncode != 0:
+            return {"status": "unknown", "reason": "client_list_command_failed"}
         if lines:
             return {"status": "unknown", "reason": "client_list_unparseable"}
         return {"status": "ok", "connection": "offline",
                 "reason": "no_mqtt_clients", "mqtt_clients": 0}
+    if len(clients) != len(lines):
+        return {"status": "unknown", "reason": "client_list_unparseable"}
     non_backend = [name for name in clients if name != "onprem-backend"]
     if non_backend:
         return {"status": "unknown", "connection": "unverified",
