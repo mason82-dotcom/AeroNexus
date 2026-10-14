@@ -24,11 +24,10 @@ grep -q "change-me" .env && echo "WARNING: .env still contains change-me values"
 clone_and_patch () {  # dir repo commit patchdir
   local dir=$1 repo=$2 commit=$3 patches=$4
   if [ -d "$dir/.git" ]; then
-    # Existing clones must never be reset, cleaned, or patched implicitly.
-    # Compare the ordered commit subjects with the patch mail subjects.
-    # This verifies the current pinned patch series without changing files.
-    local -a patch_files=()
-    local patch subject commit_subject index=0
+    # Existing clones are read-only here: never reset, clean, or patch implicitly.
+    # Stable patch IDs compare actual diffs, not folded email subjects.
+    local -a patch_files=() commits=()
+    local patch commit_sha expected actual index=0
     for patch in "$patches"/*.patch; do
       [ -f "$patch" ] || { echo "ERROR: no patches in $patches" >&2; return 1; }
       patch_files+=("$patch")
@@ -37,30 +36,27 @@ clone_and_patch () {  # dir repo commit patchdir
       echo "ERROR: $dir does not descend from pinned upstream $commit" >&2
       return 1
     fi
-    local count
-    count=$(git -C "$dir" rev-list --count "$commit..HEAD")
-    if [ "$count" -gt "${#patch_files[@]}" ]; then
-      echo "ERROR: $dir has $count commits, but only ${#patch_files[@]} patches; manual review required" >&2
+    mapfile -t commits < <(git -C "$dir" rev-list --reverse "$commit..HEAD")
+    if [ "${#commits[@]}" -gt "${#patch_files[@]}" ]; then
+      echo "ERROR: unexpected commits in $dir; manual review required" >&2
       return 1
     fi
-    local -a commit_subjects=()
-    mapfile -t commit_subjects < <(git -C "$dir" log --reverse --format=%s "$commit..HEAD")
     for patch in "${patch_files[@]}"; do
-      subject=$(sed -n 's/^Subject: \(\[PATCH[^]]*\] \)\?//p' "$patch" | head -n 1)
-      [ -n "$subject" ] || { echo "ERROR: no Subject in $patch" >&2; return 1; }
-      if [ "$index" -lt "$count" ]; then
-        commit_subject=${commit_subjects[$index]}
-        if [ "$subject" != "$commit_subject" ]; then
-          echo "ERROR: patch/commit mismatch at $patch: $subject != $commit_subject" >&2
-          return 1
-        fi
-      else
-        echo "ERROR: missing patch: $patch; apply manually after review" >&2
+      if [ "$index" -ge "${#commits[@]}" ]; then
+        echo "ERROR: patch not committed in $dir: ${patch##*/}" >&2
+        echo "       Existing working-tree changes are preserved; review manually." >&2
+        return 1
+      fi
+      commit_sha=${commits[$index]}
+      expected=$(git patch-id --stable < "$patch" | awk '{print $1}')
+      actual=$(git -C "$dir" show --format= --no-ext-diff "$commit_sha" | git patch-id --stable | awk '{print $1}')
+      if [ -z "$expected" ] || [ -z "$actual" ] || [ "$expected" != "$actual" ]; then
+        echo "ERROR: patch mismatch at ${patch##*/} (commit $commit_sha)" >&2
         return 1
       fi
       index=$((index + 1))
     done
-    echo "== $dir: verified $count ordered patch commits; no changes made"
+    echo "== $dir: verified $index patch commits by stable patch ID; no changes made"
     return
   fi
   git clone -q "$repo" "$dir"
