@@ -10,7 +10,7 @@ Subject: [PATCH] onprem: use Forst as fallback map center
 diff --git a/src/hooks/use-g-map.ts b/src/hooks/use-g-map.ts
 --- a/src/hooks/use-g-map.ts
 +++ b/src/hooks/use-g-map.ts
-@@ -5,6 +5,6 @@
+@@ -5,5 +5,5 @@
  
  function envCenter (): [number, number] {
 -  const raw = (import.meta.env.VITE_MAP_CENTER as string) || '10.45,51.16' // lng,lat (Germany)
