@@ -65,8 +65,8 @@ class DiagnosticsTests(unittest.TestCase):
     def test_dji_cli_exit_one_with_valid_clients(self, run):
         run.return_value.returncode = 1
         run.return_value.stdout = (
-            "Client(a, username=onprem-backend, connected=true)\\n"
-            "Client(b, username=onprem-backend, connected=true)\\n"
+            "Client(a, username=onprem-backend, connected=true)\n"
+            "Client(b, username=onprem-backend, connected=true)\n"
         )
         result = health.dji_connection_check()
         self.assertEqual(result["status"], "ok")
@@ -102,6 +102,7 @@ class DiagnosticsTests(unittest.TestCase):
 
     @patch.object(health.subprocess, "run")
     def test_dji_no_clients_is_offline(self, run):
+        run.return_value.returncode = 0
         run.return_value.stdout = ""
         self.assertEqual(health.dji_connection_check()["connection"], "offline")
 
