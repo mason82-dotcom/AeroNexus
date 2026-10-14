@@ -24,8 +24,33 @@ grep -q "change-me" .env && echo "WARNING: .env still contains change-me values"
 clone_and_patch () {  # dir repo commit patchdir
   local dir=$1 repo=$2 commit=$3 patches=$4
   if [ -d "$dir/.git" ]; then
-    echo "== $dir exists, skipping clone (delete runtime/upstream to re-apply patches)"
-    return
+    # Existing upstream trees may already contain patches as commits or working-tree
+    # changes. Never reset, clean, or overwrite user changes.
+    local patch
+    local -a missing=()
+    for patch in "$patches"/*.patch; do
+      if git -C "$dir" apply --reverse --check "$patch" >/dev/null 2>&1; then
+        echo "== already applied: ${patch##*/}"
+      else
+        missing+=("$patch")
+      fi
+    done
+    if [ "${#missing[@]}" -eq 0 ]; then
+      echo "== $dir: all patches present"
+      return
+    fi
+    if [ -n "$(git -C "$dir" status --porcelain --untracked-files=no)" ]; then
+      echo "ERROR: $dir has tracked local changes and missing patches; refusing to modify it." >&2
+      echo "       Review and preserve local changes before applying patches manually." >&2
+      return 1
+    fi
+    # Verify the entire patch series on a temporary index/worktree copy first.
+    # Applying to the real tree is deliberately not automatic: patch ordering,
+    # existing commits and conflicts require maintainer review.
+    echo "ERROR: $dir has missing patches; refusing automatic patch application." >&2
+    printf '  missing: %s\n' "${missing[@]}" >&2
+    echo "       Apply them in order after reviewing upstream state." >&2
+    return 1
   fi
   git clone -q "$repo" "$dir"
   git -C "$dir" checkout -q "$commit"
