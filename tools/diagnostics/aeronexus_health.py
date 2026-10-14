@@ -95,6 +95,31 @@ def tcp_check(host, port):
                 "error": type(exc).__name__}
 
 
+def tsdk_check():
+    """Query the internal thermal SDK health endpoint without exposing a port."""
+    command = [
+        "docker", "exec", f"{PROJECT}-tsdk-1", "python3", "-c",
+        "import urllib.request,sys; "
+        "sys.stdout.write(urllib.request.urlopen("
+        "'http://127.0.0.1:6793/health', timeout=4).read(4096).decode())",
+    ]
+    try:
+        result = subprocess.run(
+            command, capture_output=True, text=True, timeout=8, check=True
+        )
+        payload = json.loads(result.stdout)
+        if not isinstance(payload, dict) or not isinstance(payload.get("sdk"), bool):
+            return {"status": "error", "reason": "invalid_health_response"}
+        return {
+            "status": "ok" if payload["sdk"] else "warning",
+            "sdk_installed": payload["sdk"],
+            "runner": payload.get("runner", "unknown"),
+            "version": payload.get("version", ""),
+        }
+    except (OSError, subprocess.SubprocessError, ValueError) as exc:
+        return {"status": "error", "error": type(exc).__name__}
+
+
 def build_report():
     checks = {}
     try:
@@ -112,6 +137,7 @@ def build_report():
         checks[f"http.{name}"] = http_check(url)
     for name, (host, port) in TCP.items():
         checks[f"tcp.{name}"] = tcp_check(host, port)
+    checks["tsdk.sdk"] = tsdk_check()
     checks["dji.connection"] = {
         "status": "unknown",
         "reason": "telemetry_probe_not_implemented",
