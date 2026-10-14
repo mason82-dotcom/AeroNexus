@@ -23,10 +23,62 @@ grep -q "change-me" .env && echo "WARNING: .env still contains change-me values"
 
 clone_and_patch () {  # dir repo commit patchdir
   local dir=$1 repo=$2 commit=$3 patches=$4
-  if [ -d "$dir/.git" ]; then
-    echo "== $dir exists, skipping clone (delete runtime/upstream to re-apply patches)"
-    return
+  local -a patch_files=() commits=()
+  local patch commit_sha expected actual index=0 commit_output
+  local git_root
+
+  # An existing path must never be overwritten, even if it is not a valid clone.
+  if [ -e "$dir" ] || [ -L "$dir" ]; then
+    if ! git -C "$dir" rev-parse --is-inside-work-tree 2>/dev/null | grep -qx true; then
+      echo "ERROR: existing path is not a valid Git working tree: $dir" >&2
+      return 1
+    fi
+    git_root=$(git -C "$dir" rev-parse --show-toplevel) || return 1
+    if [ "$(cd "$dir" && pwd -P)" != "$(cd "$git_root" && pwd -P)" ]; then
+      echo "ERROR: existing path is nested inside another Git working tree: $dir" >&2
+      return 1
+    fi
+
+    # Existing clones are read-only: never reset, clean, or apply patches.
+    for patch in "$patches"/*.patch; do
+      [ -f "$patch" ] || { echo "ERROR: no patches in $patches" >&2; return 1; }
+      patch_files+=("$patch")
+    done
+    if ! git -C "$dir" merge-base --is-ancestor "$commit" HEAD; then
+      echo "ERROR: $dir does not descend from pinned upstream $commit" >&2
+      return 1
+    fi
+    if ! commit_output=$(git -C "$dir" rev-list --reverse "$commit..HEAD"); then
+      echo "ERROR: unable to read patch commits in $dir" >&2
+      return 1
+    fi
+    if [ -n "$commit_output" ]; then
+      mapfile -t commits <<< "$commit_output"
+    fi
+    if [ "${#commits[@]}" -ne "${#patch_files[@]}" ]; then
+      echo "ERROR: $dir has ${#commits[@]} patch commits, expected ${#patch_files[@]}; existing files preserved" >&2
+      return 1
+    fi
+    for patch in "${patch_files[@]}"; do
+      commit_sha=${commits[$index]}
+      expected=$(git patch-id --stable < "$patch" | awk '{print $1}') || return 1
+      actual=$(git -C "$dir" show --format= --no-ext-diff "$commit_sha" | git patch-id --stable | awk '{print $1}') || return 1
+      if [ -z "$expected" ] || [ -z "$actual" ] || [ "$expected" != "$actual" ]; then
+        echo "ERROR: patch mismatch at ${patch##*/} (commit $commit_sha)" >&2
+        return 1
+      fi
+      index=$((index + 1))
+    done
+    if [ -n "$(git -C "$dir" status --porcelain --untracked-files=all)" ]; then
+      echo "WARNING: $dir has uncommitted or untracked files; verification covers commits only" >&2
+    fi
+    echo "== $dir: verified $index patch commits by stable patch ID; no changes made"
+    return 0
   fi
+
+  for patch in "$patches"/*.patch; do
+    [ -f "$patch" ] || { echo "ERROR: no patches in $patches" >&2; return 1; }
+  done
   git clone -q "$repo" "$dir"
   git -C "$dir" checkout -q "$commit"
   git -C "$dir" -c user.name=aeronexus -c user.email=aeronexus@local am -q "$patches"/*.patch
