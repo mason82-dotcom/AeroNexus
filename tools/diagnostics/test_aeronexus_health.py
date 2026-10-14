@@ -23,7 +23,7 @@ class DiagnosticsTests(unittest.TestCase):
         report = health.build_report()
         self.assertEqual(report["overall_status"], "ok")
         self.assertEqual(report["summary"],
-                         {"ok": 20, "warning": 0, "error": 0, "unknown": 1})
+                         {"ok": 20, "warning": 0, "error": 0, "unknown": 2})
         self.assertEqual(report["checks"]["dji.connection"]["status"], "unknown")
 
     @patch.object(health, "dji_connection_check", return_value={"status": "unknown"})
@@ -60,6 +60,20 @@ class DiagnosticsTests(unittest.TestCase):
         run.return_value.stdout = '{"sdk":"yes"}'
         self.assertEqual(health.tsdk_check()["status"], "error")
 
+
+    def test_dji_telemetry_inactive_when_offline(self):
+        result = health.dji_telemetry_check({"connection": "offline"})
+        self.assertEqual(result["status"], "ok")
+        self.assertEqual(result["telemetry"], "inactive")
+
+    def test_dji_telemetry_unknown_with_unverified_client(self):
+        result = health.dji_telemetry_check({"connection": "unverified"})
+        self.assertEqual(result["status"], "unknown")
+        self.assertEqual(result["telemetry"], "unverified")
+
+    def test_dji_telemetry_unknown_on_broker_failure(self):
+        result = health.dji_telemetry_check({"status": "unknown"})
+        self.assertEqual(result["status"], "unknown")
 
     @patch.object(health.subprocess, "run")
     def test_dji_cli_exit_one_with_valid_clients(self, run):
