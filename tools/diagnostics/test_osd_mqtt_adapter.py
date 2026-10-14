@@ -30,7 +30,28 @@ class AdapterTests(unittest.TestCase):
         adapter = Adapter()
         adapter.on_connect(client, None, None, 0)
         self.assertEqual(client.calls, [("thing/product/+/osd", 0)])
+        self.assertFalse(adapter.subscribed)
+        adapter.on_subscribe(client, None, 1, [0])
         self.assertTrue(adapter.subscribed)
+
+    def test_broker_denied_subscription(self):
+        adapter = Adapter()
+        adapter.on_connect(FakeClient(), None, None, 0)
+        adapter.on_subscribe(None, None, 1, [135])
+        self.assertFalse(adapter.subscribed)
+
+    def test_wrong_suback_id_ignored(self):
+        adapter = Adapter()
+        adapter.on_connect(FakeClient(), None, None, 0)
+        adapter.on_subscribe(None, None, 2, [0])
+        self.assertFalse(adapter.subscribed)
+
+    def test_disconnect_before_suback(self):
+        adapter = Adapter()
+        adapter.on_connect(FakeClient(), None, None, 0)
+        adapter.on_disconnect(None, None)
+        adapter.on_subscribe(None, None, 1, [0])
+        self.assertFalse(adapter.subscribed)
 
     def test_rejected_connection_does_not_subscribe(self):
         client = FakeClient()
@@ -54,6 +75,7 @@ class AdapterTests(unittest.TestCase):
         adapter = Adapter()
         adapter.receiver.clock = lambda: 100
         adapter.on_connect(FakeClient(), None, None, 0)
+        adapter.on_subscribe(None, None, 1, [0])
         msg = types.SimpleNamespace(topic="thing/product/a/osd", payload=b'{"data":{"x":1}}')
         adapter.on_message(None, None, msg)
         self.assertEqual(adapter.status("a", True)["telemetry"], "active")
