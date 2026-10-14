@@ -61,7 +61,7 @@ Die SQL-Dateien laufen nur beim allerersten Start von MySQL (leeres `data/mysql`
 |---|---|---|
 | 8085 | Web-UI + Pilot-Login | Browser, Pilot 2 |
 | 6789 | Backend API + WebSocket | Browser, Pilot 2 |
-| 1884 / 8084 | MQTT / MQTT über WS | Pilot 2, Backend |
+| 1884 / 8084 | MQTT / MQTT über WS | Pilot 2, Backend, Anzeige `companion` (nur lesen) |
 | 9000 | MinIO S3 | Pilot 2 (Uploads), Browser, Compute-Agent |
 | 1935 | RTMP-Ingest | Pilot 2 |
 | 8889 / 8888 / 8554 | WebRTC (WHEP/WHIP) / HLS / RTSP | Browser (mit Web-Login), VLC (mit RTSP-Login) |
@@ -159,6 +159,10 @@ Läuft der Mapping-Dienst nicht, startet kein Livestream.
   `SERVER_HOST:9000` muss vom Controller aus erreichbar sein.
 - **Neuer Login in bestehender Installation:** Die Bootstrap-CSV von EMQX und die SQL-Dateien greifen nur beim
   allerersten Start. Neue Benutzer (z. B. `pilot2`) zusaetzlich per EMQX-Dashboard/API und SQL anlegen.
+- **Anzeige-Zugang `companion` (Freenove-Board, nur lesen):** darf laut `telemetry/emqx/acl.conf` ausschliesslich
+  `thing/product/+/osd` abonnieren und nichts senden (kein `status`: `update_topo` enthaelt `device_secret`). Passwort `MQTT_COMPANION_PASSWORD`
+  in `.env`. In einer bestehenden Installation den Benutzer einmalig per Dashboard/API anlegen
+  (`POST /api/v5/authentication/password_based:built_in_database/users`); die ACL greift nach einem Neustart von `emqx`.
 - **SQL-Änderungen greifen nicht:** MySQL war schon initialisiert. Dann `runtime/initdb/02_*.sql` und `03_*.sql`
   per `docker compose exec -T mysql mysql -uroot -p... < datei.sql` einspielen.
 
