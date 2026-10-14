@@ -17,7 +17,7 @@ diff --git a/src/hooks/use-g-map.ts b/src/hooks/use-g-map.ts
 +  const raw = (import.meta.env.VITE_MAP_CENTER as string) || '8.5842,49.1533' // lng,lat (Forst, 76694)
    const [lng, lat] = raw.split(',').map(Number)
    return [lng, lat]
-@@ -17,7 +17,7 @@
+@@ -17,6 +17,6 @@
      state.aMap = AMapShim
      state.map = new AMapShim.Map(container, {
        center: envCenter(),
