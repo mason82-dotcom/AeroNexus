@@ -38,7 +38,7 @@ class ReceiverTests(unittest.TestCase):
 
     def test_non_utf8_rejected(self):
         receiver = PassiveOsdReceiver()
-        self.assertFalse(receiver.accept("thing/product/a/osd", b"\\xff"))
+        self.assertFalse(receiver.accept("thing/product/a/osd", bytes([255])))
 
     def test_device_isolation(self):
         receiver = PassiveOsdReceiver(clock=lambda: 100)
