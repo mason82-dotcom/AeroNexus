@@ -23,7 +23,7 @@ grep -q "change-me" .env && echo "WARNING: .env still contains change-me values"
 
 clone_and_patch () {  # dir repo commit patchdir
   local dir=$1 repo=$2 commit=$3 patches=$4
-  if [ -d "$dir/.git" ]; then
+  if git -C "$dir" rev-parse --is-inside-work-tree 2>/dev/null | grep -qx true; then
     # Existing clones are read-only here: never reset, clean, or patch implicitly.
     # Stable patch IDs compare actual diffs, not folded email subjects.
     local -a patch_files=() commits=()
