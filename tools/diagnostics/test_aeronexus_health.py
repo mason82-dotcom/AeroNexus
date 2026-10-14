@@ -64,8 +64,8 @@ class DiagnosticsTests(unittest.TestCase):
     @patch.object(health.subprocess, "run")
     def test_dji_offline_with_backend_only(self, run):
         run.return_value.stdout = (
-            "Client(a, username=onprem-backend, connected=true)\\n"
-            "Client(b, username=onprem-backend, connected=true)\\n"
+            "Client(a, username=onprem-backend, connected=true)\n"
+            "Client(b, username=onprem-backend, connected=true)\n"
         )
         result = health.dji_connection_check()
         self.assertEqual(result["connection"], "offline")
@@ -75,8 +75,8 @@ class DiagnosticsTests(unittest.TestCase):
     @patch.object(health.subprocess, "run")
     def test_dji_non_backend_is_unverified(self, run):
         run.return_value.stdout = (
-            "Client(a, username=onprem-backend, connected=true)\\n"
-            "Client(b, username=pilot2, connected=true)\\n"
+            "Client(a, username=onprem-backend, connected=true)\n"
+            "Client(b, username=pilot2, connected=true)\n"
         )
         result = health.dji_connection_check()
         self.assertEqual(result["status"], "unknown")
