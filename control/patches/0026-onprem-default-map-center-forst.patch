@@ -10,14 +10,14 @@ Subject: [PATCH] onprem: use Forst as fallback map center
 diff --git a/src/hooks/use-g-map.ts b/src/hooks/use-g-map.ts
 --- a/src/hooks/use-g-map.ts
 +++ b/src/hooks/use-g-map.ts
-@@ -5,6 +5,6 @@ import AMapShim from '/@/vendors/amap-leaflet-shim'
+@@ -5,6 +5,6 @@
  
  function envCenter (): [number, number] {
 -  const raw = (import.meta.env.VITE_MAP_CENTER as string) || '10.45,51.16' // lng,lat (Germany)
 +  const raw = (import.meta.env.VITE_MAP_CENTER as string) || '8.5842,49.1533' // lng,lat (Forst, 76694)
    const [lng, lat] = raw.split(',').map(Number)
    return [lng, lat]
-@@ -17,6 +17,6 @@ export function useGMapManage () {
+@@ -17,7 +17,7 @@
      state.aMap = AMapShim
      state.map = new AMapShim.Map(container, {
        center: envCenter(),
