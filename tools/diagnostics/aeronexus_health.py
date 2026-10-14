@@ -137,7 +137,8 @@ def build_report():
         checks[f"http.{name}"] = http_check(url)
     for name, (host, port) in TCP.items():
         checks[f"tcp.{name}"] = tcp_check(host, port)
-    checks["tsdk.sdk"] = tsdk_check()\n    checks["dji.connection"] = {
+    checks["tsdk.sdk"] = tsdk_check()
+    checks["dji.connection"] = {
         "status": "unknown",
         "reason": "telemetry_probe_not_implemented",
     }
