@@ -62,6 +62,24 @@ class DiagnosticsTests(unittest.TestCase):
 
 
     @patch.object(health.subprocess, "run")
+    def test_dji_cli_exit_one_with_valid_clients(self, run):
+        run.return_value.returncode = 1
+        run.return_value.stdout = (
+            "Client(a, username=onprem-backend, connected=true)\\n"
+            "Client(b, username=onprem-backend, connected=true)\\n"
+        )
+        result = health.dji_connection_check()
+        self.assertEqual(result["status"], "ok")
+        self.assertEqual(result["connection"], "offline")
+        self.assertEqual(result["mqtt_clients"], 2)
+
+    @patch.object(health.subprocess, "run")
+    def test_dji_cli_failure_without_clients_stays_unknown(self, run):
+        run.return_value.returncode = 1
+        run.return_value.stdout = "Error: unavailable\\n"
+        self.assertEqual(health.dji_connection_check()["status"], "unknown")
+
+    @patch.object(health.subprocess, "run")
     def test_dji_offline_with_backend_only(self, run):
         run.return_value.stdout = (
             "Client(a, username=onprem-backend, connected=true)\n"
