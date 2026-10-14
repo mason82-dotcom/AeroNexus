@@ -1,7 +1,7 @@
-"""MQTT callback adapter for read-only DJI OSD observation.
+"""MQTT callback adapter for the dedicated, ACL-restricted OSD observer.
 
-An externally configured MQTT client must authenticate as the ACL-limited
-'companion' user. This module never connects, publishes, or changes EMQX.
+This module never connects, publishes, or changes EMQX. A successful
+SUBSCRIBE request is not proof that the broker granted the subscription.
 """
 from passive_osd_receiver import PassiveOsdReceiver
 
@@ -12,18 +12,31 @@ class ReadOnlyOsdMqttAdapter:
     def __init__(self, receiver: PassiveOsdReceiver | None = None):
         self.receiver = receiver if receiver is not None else PassiveOsdReceiver()
         self.subscribed = False
+        self._pending_mid = None
 
     def on_connect(self, client, userdata, flags, reason_code, properties=None):
-        """Subscribe only after a successful MQTT connection."""
+        """Request OSD only after authentication; await broker SUBACK."""
         self.subscribed = False
+        self._pending_mid = None
         if reason_code != 0:
             return
         result = client.subscribe(OSD_SUBSCRIPTION, qos=0)
-        # Paho returns (result_code, mid); success is result_code == 0.
-        self.subscribed = isinstance(result, tuple) and len(result) >= 1 and result[0] == 0
+        if isinstance(result, tuple) and len(result) >= 2 and result[0] == 0:
+            self._pending_mid = result[1]
+
+    def on_subscribe(self, client, userdata, mid, reason_codes, properties=None):
+        """Mark subscribed only when SUBACK grants the requested QoS."""
+        if self._pending_mid is None or mid != self._pending_mid:
+            return
+        self._pending_mid = None
+        self.subscribed = (
+            len(reason_codes) == 1
+            and int(reason_codes[0]) in (0, 1, 2)
+        )
 
     def on_disconnect(self, client, userdata, *args):
         self.subscribed = False
+        self._pending_mid = None
 
     def on_message(self, client, userdata, message):
         if not self.subscribed:
