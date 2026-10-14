@@ -2,8 +2,8 @@
 """Opt-in, read-only MQTT OSD observer; never publishes or changes broker config.
 
 Requires: python3 -m pip install paho-mqtt
-Environment: AERONEXUS_OSD_PASSWORD (mandatory), AERONEXUS_OSD_HOST,
-AERONEXUS_OSD_PORT, AERONEXUS_OSD_DEVICE_ID (optional).
+Environment: AERONEXUS_OSD_USERNAME and AERONEXUS_OSD_PASSWORD (mandatory), AERONEXUS_OSD_HOST,
+AERONEXUS_OSD_PORT (optional). Use a dedicated broker account with OSD-only ACL.
 """
 import argparse
 import json
@@ -15,6 +15,11 @@ from osd_mqtt_adapter import ReadOnlyOsdMqttAdapter
 
 
 def configuration(environ):
+    username = environ.get("AERONEXUS_OSD_USERNAME")
+    if not username or username.strip() != username or any(ch.isspace() for ch in username):
+        raise ValueError("AERONEXUS_OSD_USERNAME must be set to a dedicated account")
+    if username in {"companion", "backend", "admin", "dashboard"}:
+        raise ValueError("shared or privileged MQTT accounts are not allowed")
     password = environ.get("AERONEXUS_OSD_PASSWORD")
     if not password:
         raise ValueError("AERONEXUS_OSD_PASSWORD must be set")
@@ -24,7 +29,7 @@ def configuration(environ):
     port = int(environ.get("AERONEXUS_OSD_PORT", "1884"))
     if not 1 <= port <= 65535:
         raise ValueError("broker port out of range")
-    return host, port, password
+    return host, port, username, password
 
 
 def main(argv=None):
@@ -34,7 +39,7 @@ def main(argv=None):
     if not 1 <= args.seconds <= 300:
         parser.error("--seconds must be between 1 and 300")
     try:
-        host, port, password = configuration(os.environ)
+        host, port, username, password = configuration(os.environ)
     except ValueError as exc:
         parser.error(str(exc))
     try:
@@ -44,7 +49,7 @@ def main(argv=None):
 
     adapter = ReadOnlyOsdMqttAdapter()
     client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2, client_id="aeronexus-osd-observer")
-    client.username_pw_set("companion", password)
+    client.username_pw_set(username, password)
     client.on_connect = adapter.on_connect
     client.on_disconnect = adapter.on_disconnect
     client.on_message = adapter.on_message
