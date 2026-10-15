@@ -144,6 +144,10 @@ Editing routes (mapping-tool/service/app/wpml.py, verified with Pilot 2 on RC Pr
   by the one-shot `mapping-db-init` (mysql image) on every start; needs SELECT grants for each new
   cloud_sample table the service reads. Auth: DJI JWT (x-auth-token)
   for the web, `MAPPING_AGENT_TOKEN` bearer for the compute agent. Agent API: mapping-tool/docs/agent-api.md.
+- Drone of a media file: Pilot 2 reports the drone connected at upload time (wrong for SD cards moved between
+  drones). The mapping ingest uses XMP drone-dji:DroneSerialNumber (media_meta drone_serial, extractor v3) and
+  falls back to Pilot's value; cloud_sample.media_file.drone stays as reported. Older rows are re-read in the
+  background after an extractor VERSION bump and moved to the right flight set (empty sets removed).
 - Object keys of Pilot 2 uploads are not reliable DJI names: some land as `wayline/org_<hash>_<ms>.<ext>`
   (seen 2026-10-15), the DJI name is only in cloud_sample.media_file.file_name. Services without DB access find
   files by content: pv pre-measurement by R-JPEG APP3 data, farming M3M bands by XMP ImageSource + CaptureUUID

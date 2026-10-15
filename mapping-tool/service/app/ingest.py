@@ -2,7 +2,7 @@
 
 For each new file in cloud_sample.media_file: category from the DJI file name, shot key (all files of one
 shutter release), metadata (EXIF/XMP into media_meta) and thumbnail prepared ahead, and assignment to a
-flight set: shots of the same drone at most FLIGHT_GAP apart, independent of the upload order (manual
+flight set of the drone that took it (aircraft serial from XMP, Pilot 2's drone only as fallback): shots of the same drone at most FLIGHT_GAP apart, independent of the upload order (manual
 uploads arrive out of order). Nothing here starts a mapping job or an inspection; the sets only make them
 one click away. Thermal temperature matrices are pre-measured by the pv service itself.
 """
@@ -98,6 +98,11 @@ def set_kind(categories: Counter) -> str:
     if present == {"video"}:
         return "video"
     return "mixed"
+
+
+def effective_drone(meta: dict | None, pilot_drone: str | None) -> str:
+    """Drone of a file: serial written by the aircraft (XMP) if present, else what Pilot 2 reported."""
+    return (meta or {}).get("drone_serial") or pilot_drone or ""
 
 
 # ------------------------------------------------------------- MinIO + MySQL
@@ -232,6 +237,7 @@ def prepare_pending(settings, storage, db, limit: int = BATCH) -> int:
                         cur.execute("INSERT INTO media_meta (file_id, workspace_id, meta) VALUES (%s, %s, %s)"
                                     " ON DUPLICATE KEY UPDATE meta = VALUES(meta), extracted_at = UTC_TIMESTAMP(3)",
                                     (row["file_id"], row["workspace_id"], json.dumps(prep["meta"])))
+                    row = {**row, "drone": effective_drone(prep["meta"], row["drone"])}
                     prep["shot_key"], set_id = _resolve_shot(cur, row, prep["shot_key"], prep["captured_at"])
                     if set_id is None and prep["captured_at"]:
                         set_id = _assign_set(cur, row, prep["captured_at"])
@@ -255,11 +261,79 @@ def prepare_pending(settings, storage, db, limit: int = BATCH) -> int:
     return done
 
 
+def _stale(cur, settings, limit: int) -> list[dict]:
+    """Prepared files whose stored metadata comes from an older extractor version, or whose aircraft serial
+    differs from their drone (metadata re-read by the media list API before this pass saw the file)."""
+    cur.execute(
+        f"SELECT i.file_id, i.workspace_id, i.drone, i.flight_set_id, i.captured_at, m.file_name, m.object_key,"
+        f" m.drone AS pilot_drone FROM media_ingest i"
+        f" JOIN `{settings.media_database}`.media_file m ON m.file_id = i.file_id"
+        f" JOIN media_meta mm ON mm.file_id = i.file_id"
+        f" WHERE i.meta_ok = 1 AND (COALESCE(JSON_EXTRACT(mm.meta, '$.v'), 0) < %s"
+        f" OR JSON_UNQUOTE(JSON_EXTRACT(mm.meta, '$.drone_serial')) <> i.drone) LIMIT %s",
+        (mediameta.VERSION, limit))
+    return cur.fetchall()
+
+
+def _move_to_drone(cur, row: dict, drone: str) -> str | None:
+    """Put an already prepared file into the flight set of `drone`; empty sets left behind are removed."""
+    old = row["flight_set_id"]
+    cur.execute("UPDATE media_ingest SET drone = %s, flight_set_id = NULL WHERE file_id = %s", (drone, row["file_id"]))
+    new = _assign_set(cur, {**row, "drone": drone}, row["captured_at"]) if row["captured_at"] else None
+    cur.execute("UPDATE media_ingest SET flight_set_id = %s WHERE file_id = %s", (new, row["file_id"]))
+    if new:
+        _refresh_set(cur, new)
+    if old and old != new:
+        cur.execute("SELECT COUNT(*) AS n FROM media_ingest WHERE flight_set_id = %s", (old,))
+        if cur.fetchone()["n"]:
+            _refresh_set(cur, old)
+        else:
+            cur.execute("DELETE FROM flight_set WHERE id = %s", (old,))
+    return new
+
+
+def refresh_stale(settings, storage, db, limit: int = BATCH) -> int:
+    """Re-extract up to `limit` outdated metadata rows; a file whose aircraft serial names another drone than
+    its flight set moves to that drone's set. Returns the number refreshed."""
+    conn = db.connect(settings, settings.mysql_database)
+    done = 0
+    try:
+        with conn.cursor() as cur:
+            cur.execute("SELECT GET_LOCK(%s, 0) AS got", (LOCK_NAME,))
+            if not cur.fetchone()["got"]:
+                return 0
+            try:
+                for row in _stale(cur, settings, limit):
+                    try:
+                        meta = read_meta(settings, storage, row)
+                    except Exception as exc:
+                        log.warning("ingest: metadata of %s not readable: %s", row["file_name"], exc)
+                        meta = {"v": mediameta.VERSION, "error": "not readable"}
+                    cur.execute("UPDATE media_meta SET meta = %s, extracted_at = UTC_TIMESTAMP(3) WHERE file_id = %s",
+                                (json.dumps(meta), row["file_id"]))
+                    drone = effective_drone(meta, row["pilot_drone"])
+                    if drone != (row["drone"] or ""):
+                        new = _move_to_drone(cur, row, drone)
+                        log.info("ingest: %s drone %s -> %s (aircraft serial), set %s", row["file_name"],
+                                 row["drone"] or "-", drone, (new or "-")[:8])
+                    conn.commit()
+                    done += 1
+            finally:
+                cur.execute("SELECT RELEASE_LOCK(%s)", (LOCK_NAME,))
+                conn.commit()
+    finally:
+        conn.close()
+    return done
+
+
 def start(settings, storage, db, stop: threading.Event) -> threading.Thread:
     def run():
         while not stop.is_set():
             try:
                 while prepare_pending(settings, storage, db) == BATCH and not stop.is_set():
+                    pass
+                # older metadata (extractor version bump): re-read in the background, BATCH per pass
+                while refresh_stale(settings, storage, db) == BATCH and not stop.is_set():
                     pass
             except Exception as exc:
                 log.warning("ingest round failed: %s", exc)

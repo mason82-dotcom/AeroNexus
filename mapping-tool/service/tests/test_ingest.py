@@ -3,7 +3,7 @@ import unittest
 from collections import Counter
 from datetime import datetime, timedelta
 
-from app import ingest
+from app import ingest, mediameta
 
 
 class ClassifyTest(unittest.TestCase):
@@ -79,6 +79,26 @@ class FlightSetTest(unittest.TestCase):
         self.assertEqual(ingest.set_kind(Counter(visible=7)), "rgb")
         self.assertEqual(ingest.set_kind(Counter(video=2)), "video")
         self.assertEqual(ingest.set_kind(Counter(rgb=1, video=1)), "mixed")
+
+
+
+class DroneAttributionTest(unittest.TestCase):
+    """Pilot 2 attributes uploads to the drone connected at upload time; the aircraft writes its own serial."""
+    XMP = (b'<x:xmpmeta xmlns:x="adobe:ns:meta/"><rdf:RDF><rdf:Description '
+           b'drone-dji:DroneSerialNumber="%s" drone-dji:CameraSerialNumber="1TCTL2J03BJ0D0" '
+           b'drone-dji:RelativeAltitude="+53.0"/></rdf:RDF></x:xmpmeta>')
+
+    def test_serials_from_xmp(self):
+        meta = mediameta.extract(self.XMP % b"1581F5FJD233600D2460", 1000, "DJI_20241019124500_0708_T.JPG")
+        self.assertEqual((meta["drone_serial"], meta["camera_serial"]), ("1581F5FJD233600D2460", "1TCTL2J03BJ0D0"))
+        self.assertIsNone(mediameta.extract(self.XMP % b"../x", 1000, "a.JPG")["drone_serial"])
+
+    def test_aircraft_serial_wins_over_pilot(self):
+        # 2026-10-15: M3T photos from an SD card in the Mavic 3E were reported with the M3E serial
+        self.assertEqual(ingest.effective_drone({"drone_serial": "1581F5FJD233600D2460"}, "1581F5FHD241D00D28BZ"),
+                         "1581F5FJD233600D2460")
+        self.assertEqual(ingest.effective_drone({"drone_serial": None}, "1581F5FHD241D00D28BZ"), "1581F5FHD241D00D28BZ")
+        self.assertEqual(ingest.effective_drone(None, None), "")
 
 
 if __name__ == "__main__":

@@ -10,7 +10,7 @@ from datetime import datetime
 from PIL import Image
 
 HEAD_BYTES = 256 * 1024
-VERSION = 2                                       # bump when fields change: cached rows are re-extracted
+VERSION = 3                                       # bump when fields change: cached rows are re-extracted
 _DJI_RE = re.compile(r'dji:(ImageSource|BandName|BandFreq)="([^"]{0,60})"')
 
 # dji:ImageSource -> label; unknown values are shown as they are
@@ -36,6 +36,15 @@ def lens(source: str | None, band: str | None, freq: str | None, file_name: str)
 _XMP_RE = re.compile(rb"<x:xmpmeta.*?</x:xmpmeta>", re.S)
 _ATTR_RE = re.compile(r'drone-dji:(\w+)="([^"]{0,200})"')
 _ELEM_RE = re.compile(r"<drone-dji:(\w+)>([^<]{0,200})<")
+
+
+_SERIAL_RE = re.compile(r"^[0-9A-Z]{8,32}$")
+
+
+def serial(value: str | None) -> str | None:
+    """A DJI serial number from XMP, None if absent or malformed."""
+    value = (value or "").strip().upper()
+    return value if _SERIAL_RE.match(value) else None
 
 
 def _num(value):
@@ -100,6 +109,10 @@ def extract(data: bytes, size_bytes: int | None, file_name: str = "") -> dict:
         "band_freq": dji.get("BandFreq"),
         "captured": captured,
         "model": e.get(0x0110) or x.get("DroneModel"),
+        # serials written by the aircraft itself: Pilot 2 attributes uploads to the drone connected at upload
+        # time, which is wrong for SD cards moved between drones (2026-10-15: 156 M3T photos listed as M3E)
+        "drone_serial": serial(x.get("DroneSerialNumber")),
+        "camera_serial": serial(x.get("CameraSerialNumber")),
         "width": e.get(0xA002) or e.get("width"),
         "height": e.get(0xA003) or e.get("height"),
         "exposure_time": _ratio(e.get(0x829A)),
