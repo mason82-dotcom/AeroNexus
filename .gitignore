@@ -5,3 +5,7 @@ edge/logs/
 node_modules/
 target/
 dist/
+
+# Python bytecode from local test runs
+__pycache__/
+*.pyc
