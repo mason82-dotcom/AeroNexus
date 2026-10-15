@@ -24,7 +24,27 @@ class FakeClient:
         return self.result
 
 
+class FakeReasonCode:
+    """Like paho-mqtt 2.x ReasonCode: comparable with ==, but no __int__."""
+    def __init__(self, value):
+        self.value = value
+
+    def __eq__(self, other):
+        return self.value == getattr(other, "value", other)
+
+
 class AdapterTests(unittest.TestCase):
+    def test_paho2_reason_code_objects(self):
+        # Seen against the live broker: int(ReasonCode) raised TypeError and the
+        # observer reported "unknown" although EMQX granted the subscription.
+        adapter = Adapter()
+        adapter.on_connect(FakeClient(), None, None, FakeReasonCode(0))
+        adapter.on_subscribe(None, None, 1, [FakeReasonCode(0)])
+        self.assertTrue(adapter.subscribed)
+        adapter.on_connect(FakeClient(), None, None, FakeReasonCode(0))
+        adapter.on_subscribe(None, None, 1, [FakeReasonCode(128)])  # ACL denied (MQTT 3.1.1)
+        self.assertFalse(adapter.subscribed)
+
     def test_subscribes_to_osd_only(self):
         client = FakeClient()
         adapter = Adapter()

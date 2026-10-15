@@ -8,6 +8,12 @@ from passive_osd_receiver import PassiveOsdReceiver
 OSD_SUBSCRIPTION = "thing/product/+/osd"
 
 
+def _code(reason_code):
+    """paho-mqtt 2.x passes ReasonCode objects (compare with ==, but no int());
+    1.x and the unit tests pass plain integers."""
+    return int(getattr(reason_code, "value", reason_code))
+
+
 class ReadOnlyOsdMqttAdapter:
     def __init__(self, receiver: PassiveOsdReceiver | None = None):
         self.receiver = receiver if receiver is not None else PassiveOsdReceiver()
@@ -31,7 +37,7 @@ class ReadOnlyOsdMqttAdapter:
         self._pending_mid = None
         self.subscribed = (
             len(reason_codes) == 1
-            and int(reason_codes[0]) in (0, 1, 2)
+            and _code(reason_codes[0]) in (0, 1, 2)
         )
 
     def on_disconnect(self, client, userdata, *args):

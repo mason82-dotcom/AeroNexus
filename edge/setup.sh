@@ -108,6 +108,10 @@ CSV
 if [ -n "${MQTT_COMPANION_PASSWORD:-}" ]; then
   echo "companion,${MQTT_COMPANION_PASSWORD},false" >> $RT/emqx/auth-bootstrap.csv
 fi
+# optional read-only OSD observer; the ACL rules match the user name "aeronexus_osd"
+if [ -n "${AERONEXUS_OSD_PASSWORD:-}" ]; then
+  echo "aeronexus_osd,${AERONEXUS_OSD_PASSWORD},false" >> $RT/emqx/auth-bootstrap.csv
+fi
 
 if [ -d data/mysql/mysql ]; then
   echo "NOTE: data/mysql already initialised -> SQL files are NOT re-applied."
