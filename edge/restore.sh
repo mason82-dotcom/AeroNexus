@@ -10,7 +10,7 @@ set -euo pipefail
 cd "$(dirname "$0")"
 [ -f .env ] || { echo "ERROR: .env missing (copy BACKUP_DIR/config/env-<stamp> to edge/.env)"; exit 1; }
 set -a; source .env; set +a
-BACKUP_DIR="${BACKUP_DIR:-/mnt/hc4backup/aeronexus}"
+BACKUP_DIR="${BACKUP_DIR:-/mnt/data/aeronexus-backup}"
 NET=aeronexus-edge_default
 # same MySQL version as the live stack (override with MYSQL_IMAGE=... to test an upgrade)
 MYSQL_IMAGE="${MYSQL_IMAGE:-$(sed -n 's/^ *image: \(mysql:[0-9.]*\).*/\1/p' docker-compose.yml | head -1)}"
@@ -53,7 +53,7 @@ row_counts () {  # docker exec prefix (with MYSQL_PWD set) ...
 bucket_stats () {  # alias
   mc_run "for b in \$(mc ls --json $1 | sed -n 's/.*\"key\":\"\\([^\"]*\\)\\/\".*/\\1/p'); do
             mc ls -r --json $1/\$b | sed -n 's/.*\"size\":\\([0-9]*\\).*/\\1/p' |
-              awk -v b=\$b '{n++; s+=\$1} END {printf \"%s %d objects %d bytes\\n\", b, n, s}'
+              awk -v b=\$b '{n++; s+=\$1} END {printf \"%s %d objects %.0f bytes\\n\", b, n, s}'
           done" | sort
 }
 

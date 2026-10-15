@@ -12,7 +12,7 @@ EDGE="$(pwd)"
 
 [ -f .env ] || { echo "ERROR: .env missing"; exit 1; }
 set -a; source .env; set +a
-BACKUP_DIR="${BACKUP_DIR:-/mnt/hc4backup/aeronexus}"
+BACKUP_DIR="${BACKUP_DIR:-/mnt/data/aeronexus-backup}"
 BACKUP_KEEP_DAYS="${BACKUP_KEEP_DAYS:-14}"
 DATABASES="cloud_sample mapping"
 
