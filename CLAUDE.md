@@ -124,7 +124,10 @@ Editing routes (mapping-tool/service/app/wpml.py, verified with Pilot 2 on RC Pr
   Verified in the browser 2026-10-03 (luftbild-home, 5 km, 467 MB).
 - MinIO CE: no images/binaries published anymore -> built from pinned source in `evidence/docker/minio`
   (minio RELEASE.2025-10-15T17-29-55Z, mc RELEASE.2025-08-13T08-35-41Z). No further security fixes;
-  LAN only. Phase 2: evaluate STS-capable replacement.
+  LAN only. Own source patches in `evidence/docker/minio/patches` (image tag suffix `-an<n>`, also in restore.sh):
+  0001 accepts a signed but absent Content-Type. Pilot 2 (aws-sdk-cpp over libcurl) signs an empty Content-Type on
+  CreateMultipartUpload for types without MIME (DNG) and curl drops the header; unpatched MinIO answered AccessDenied
+  "headers ... not signed" and Pilot retried forever (2026-10-15). Phase 2: evaluate STS-capable replacement.
 - TLS (WIP): `edge/caddy/` holds a validated Caddyfile template + Dockerfile (DNS-01, cloudflare@v0.2.4 /
   duckdns@v0.5.0 build against Caddy 2.10.2). Not yet wired into compose/setup. api/application.yml and
   compose already take BROKER_*, DRC_*, OSS_ENDPOINT, WHIP_URL from env for that. Never pass MQTT_* env

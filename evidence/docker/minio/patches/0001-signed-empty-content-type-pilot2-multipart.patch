@@ -1,0 +1,16 @@
+diff --git a/cmd/signature-v4-utils.go b/cmd/signature-v4-utils.go
+index 1569dec..cc6951c 100644
+--- a/cmd/signature-v4-utils.go
++++ b/cmd/signature-v4-utils.go
+@@ -249,6 +249,11 @@ func extractSignedHeaders(signedHeaders []string, r *http.Request) (http.Header,
+ 			// But some clients deviate from this rule. Hence we consider Content-Length for signature
+ 			// calculation to be compatible with such clients.
+ 			extractedSignedHeaders.Set(header, strconv.FormatInt(r.ContentLength, 10))
++		case "content-type":
++			// AeroNexus: DJI Pilot 2 (aws-sdk-cpp 1.9.30 over libcurl) signs an empty Content-Type on
++			// CreateMultipartUpload, but libcurl drops a header with an empty value. The header was
++			// signed as empty, so verify the signature with the empty value instead of rejecting.
++			extractedSignedHeaders.Set(header, "")
+ 		default:
+ 			return nil, ErrUnsignedHeaders
+ 		}

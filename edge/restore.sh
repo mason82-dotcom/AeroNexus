@@ -14,7 +14,7 @@ BACKUP_DIR="${BACKUP_DIR:-/mnt/hc4backup/aeronexus}"
 NET=aeronexus-edge_default
 # same MySQL version as the live stack (override with MYSQL_IMAGE=... to test an upgrade)
 MYSQL_IMAGE="${MYSQL_IMAGE:-$(sed -n 's/^ *image: \(mysql:[0-9.]*\).*/\1/p' docker-compose.yml | head -1)}"
-MINIO_IMAGE=aeronexus/minio:RELEASE.2025-10-15T17-29-55Z
+MINIO_IMAGE=aeronexus/minio:RELEASE.2025-10-15T17-29-55Z-an1
 
 mode="" dump=""
 while [ $# -gt 0 ]; do

@@ -11,10 +11,15 @@ ARG MINIO_COMMIT=9e49d5e7a648f00e26f2246f4dc28e6b07f8c84a
 ARG MC_TAG=RELEASE.2025-08-13T08-35-41Z
 ARG MC_COMMIT=7394ce0dd2a80935aded936b09fa12cbb3cb8096
 
+# AeroNexus patches on the server source (patches/*.patch, applied in order; build fails if one does not apply):
+#   0001 accept a signed but absent (empty) Content-Type: DJI Pilot 2 multipart uploads (DNG, video)
+COPY patches/ /src/patches/
+
 # release time from tag: RELEASE.2025-10-15T17-29-55Z -> 2025-10-15T17:29:55Z
 WORKDIR /src/minio
 RUN git clone -q --depth 1 --branch "$MINIO_TAG" https://github.com/minio/minio.git . \
  && test "$(git rev-parse HEAD)" = "$MINIO_COMMIT" \
+ && for p in /src/patches/*.patch; do git apply --verbose "$p"; done \
  && T=$(echo "$MINIO_TAG" | sed -E 's/RELEASE\.([0-9-]+)T([0-9]+)-([0-9]+)-([0-9]+)Z/\1T\2:\3:\4Z/') \
  && go build -tags kqueue -trimpath \
       -ldflags "$(MINIO_RELEASE=RELEASE go run buildscripts/gen-ldflags.go "$T")" -o /out/minio
