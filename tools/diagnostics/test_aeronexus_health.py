@@ -10,6 +10,10 @@ health = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(health)
 
 
+# Host-dependent checks (backup directory, disks) are replaced in the report
+# tests; their logic is tested separately below.
+@patch.object(health, "disk_check", new=lambda path: {"status": "ok"})
+@patch.object(health, "backup_check", new=lambda *args, **kwargs: {"status": "ok"})
 class DiagnosticsTests(unittest.TestCase):
     @patch.object(health, "dji_connection_check", return_value={"status": "unknown"})
     @patch.object(health, "tsdk_check", return_value={"status": "ok"})
@@ -23,7 +27,7 @@ class DiagnosticsTests(unittest.TestCase):
         report = health.build_report()
         self.assertEqual(report["overall_status"], "ok")
         self.assertEqual(report["summary"],
-                         {"ok": 20, "warning": 0, "error": 0, "unknown": 2})
+                         {"ok": 27, "warning": 0, "error": 0, "unknown": 2})
         self.assertEqual(report["checks"]["dji.connection"]["status"], "unknown")
 
     @patch.object(health, "dji_connection_check", return_value={"status": "unknown"})
@@ -127,3 +131,41 @@ class DiagnosticsTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class BackupAndDiskTests(unittest.TestCase):
+    NOW = health.datetime(2026, 10, 15, 9, 0, tzinfo=health.timezone.utc)
+
+    def test_backup_age_thresholds(self):
+        fresh = health.backup_status("2026-10-15T03:15:03+02:00\nmysql x\n", self.NOW)
+        self.assertEqual((fresh["status"], fresh["age_hours"]), ("ok", 7.7))
+        one_missed = health.backup_status("2026-10-14T03:15:00+02:00", self.NOW)
+        self.assertEqual(one_missed["status"], "warning")
+        two_missed = health.backup_status("2026-10-13T03:15:00+02:00", self.NOW)
+        self.assertEqual(two_missed["status"], "error")
+
+    def test_backup_missing_or_malformed(self):
+        self.assertEqual(health.backup_status("", self.NOW)["reason"], "no_successful_backup")
+        self.assertEqual(health.backup_status("yesterday", self.NOW)["status"], "unknown")
+        self.assertEqual(health.backup_status("2026-10-15T03:15:03", self.NOW)["reason"],
+                         "last_success_without_timezone")
+
+    def test_backup_check_reads_last_success(self):
+        import tempfile
+        with tempfile.TemporaryDirectory() as tmp:
+            self.assertEqual(health.backup_check(tmp, self.NOW)["reason"], "no_successful_backup")
+            pathlib.Path(tmp, "last-success").write_text("2026-10-15T03:15:03+02:00\n")
+            self.assertEqual(health.backup_check(tmp, self.NOW)["status"], "ok")
+
+    def test_disk_thresholds(self):
+        self.assertEqual(health.disk_status(100, 40)["status"], "ok")
+        self.assertEqual(health.disk_status(100, 14)["status"], "warning")
+        self.assertEqual(health.disk_status(100, 4)["status"], "error")
+        self.assertEqual(health.disk_status(0, 0)["status"], "unknown")
+        self.assertEqual(health.disk_check("/nonexistent/aeronexus")["status"], "error")
+
+    def test_mediamtx_ports_probed(self):
+        self.assertEqual(
+            {name: port for name, (_, port) in health.TCP.items() if name.startswith("mediamtx")},
+            {"mediamtx_rtmp": 1935, "mediamtx_hls": 8888, "mediamtx_webrtc": 8889,
+             "mediamtx_rtsp": 8554})

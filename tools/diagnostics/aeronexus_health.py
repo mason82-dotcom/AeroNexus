@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
 """Read-only AeroNexus infrastructure health report (JSON to stdout)."""
 import json
+import os
+import shutil
 import socket
 import subprocess
 import sys
@@ -23,7 +25,21 @@ TCP = {
     "api": ("127.0.0.1", 6789),
     "mqtt": ("127.0.0.1", 1884),
     "emqx_dashboard": ("127.0.0.1", 18083),
+    # MediaMTX: Pilot 2 ingest and the browser/VLC players
+    "mediamtx_rtmp": ("127.0.0.1", 1935),
+    "mediamtx_hls": ("127.0.0.1", 8888),
+    "mediamtx_webrtc": ("127.0.0.1", 8889),
+    "mediamtx_rtsp": ("127.0.0.1", 8554),
 }
+
+# edge/backup.sh writes BACKUP_DIR/last-success after every good run (cron 03:15).
+# The nightly backup failed silently on 2026-10-13/14 while the stack was down.
+BACKUP_DIR = os.environ.get("BACKUP_DIR", "/mnt/hc4backup/aeronexus")
+BACKUP_WARN_HOURS = 26   # one missed night plus slack
+BACKUP_ERROR_HOURS = 50  # two missed nights
+EDGE_DATA = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "edge", "data")
+DISK_WARN_FREE_PCT = 15
+DISK_ERROR_FREE_PCT = 5
 
 
 def docker_checks():
@@ -172,6 +188,54 @@ def dji_telemetry_check(connection):
             "reason": "osd_freshness_probe_not_implemented"}
 
 
+def backup_status(last_success_text, now):
+    """Pure: classify the first line of last-success (ISO timestamp)."""
+    lines = (last_success_text or "").strip().splitlines()
+    if not lines:
+        return {"status": "error", "reason": "no_successful_backup"}
+    try:
+        stamp = datetime.fromisoformat(lines[0].strip())
+    except ValueError:
+        return {"status": "unknown", "reason": "last_success_unparseable"}
+    if stamp.tzinfo is None:
+        return {"status": "unknown", "reason": "last_success_without_timezone"}
+    age_h = round((now - stamp).total_seconds() / 3600, 1)
+    status = ("error" if age_h >= BACKUP_ERROR_HOURS else
+              "warning" if age_h >= BACKUP_WARN_HOURS else "ok")
+    return {"status": status, "last_success": lines[0].strip(), "age_hours": age_h}
+
+
+def backup_check(backup_dir=BACKUP_DIR, now=None):
+    now = now or datetime.now(timezone.utc)
+    path = os.path.join(backup_dir, "last-success")
+    try:
+        with open(path, encoding="utf-8") as handle:
+            text = handle.read(4096)
+    except FileNotFoundError:
+        return {"status": "error", "reason": "no_successful_backup", "path": path}
+    except OSError as exc:
+        return {"status": "error", "reason": "backup_dir_unreadable", "error": type(exc).__name__}
+    return backup_status(text, now)
+
+
+def disk_status(total, free):
+    """Pure: free-space classification in percent."""
+    if total <= 0:
+        return {"status": "unknown", "reason": "no_capacity"}
+    free_pct = round(free * 100 / total, 1)
+    status = ("error" if free_pct < DISK_ERROR_FREE_PCT else
+              "warning" if free_pct < DISK_WARN_FREE_PCT else "ok")
+    return {"status": status, "free_pct": free_pct, "free_gb": round(free / 1e9, 1)}
+
+
+def disk_check(path):
+    try:
+        usage = shutil.disk_usage(path)
+    except OSError as exc:
+        return {"status": "error", "reason": "path_unavailable", "error": type(exc).__name__}
+    return disk_status(usage.total, usage.free)
+
+
 def build_report():
     checks = {}
     try:
@@ -192,6 +256,9 @@ def build_report():
     checks["tsdk.sdk"] = tsdk_check()
     checks["dji.connection"] = dji_connection_check()
     checks["dji.telemetry"] = dji_telemetry_check(checks["dji.connection"])
+    checks["backup.last_success"] = backup_check()
+    checks["disk.edge_data"] = disk_check(EDGE_DATA)
+    checks["disk.backup"] = disk_check(BACKUP_DIR)
     counts = {
         state: sum(item["status"] == state for item in checks.values())
         for state in ("ok", "warning", "error", "unknown")
