@@ -36,5 +36,10 @@ def list_dirs(prefix: str) -> list[str]:
     return [d.rstrip("/") for d in (gdal.ReadDir(prefix) or [])]
 
 
+def list_recursive(prefix: str) -> list[str]:
+    """All object names below prefix, relative to it (directories end with '/')."""
+    return [n for n in (gdal.ReadDirRecursive(prefix) or []) if not n.endswith("/")]
+
+
 def remove_tree(prefix: str) -> None:
     gdal.RmdirRecursive(prefix)

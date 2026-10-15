@@ -22,7 +22,7 @@ import urllib.error
 import urllib.request
 import uuid
 
-from . import analysis, detect, pdf, storage
+from . import analysis, detect, pdf, premeasure, storage
 from .server import HttpError, route, settings
 from .thermal import ThermalError, ThermalParams, Tsdk
 
@@ -35,8 +35,20 @@ _lock = threading.Lock()                 # meta.json / anomalies.json read-modif
 tsdk = Tsdk(settings.tsdk_url)
 
 
-def converter(jpeg: bytes, tp: ThermalParams, distance: float):
-    return tsdk.temperatures(jpeg, tp, distance)
+_tsdk_lock = threading.Lock()            # inspections and pre-measurement never use the SDK at once
+
+
+def _measure(jpeg: bytes, tp: ThermalParams, distance: float):
+    with _tsdk_lock:
+        return tsdk.temperatures(jpeg, tp, distance)
+
+
+def _cache_prefix() -> str:
+    return f"/vsis3/{settings.bucket}/thermal-cache"
+
+
+# Matrices measured in the background (premeasure.py) are reused by inspections with the same parameters.
+converter = premeasure.cached_converter(_measure, _cache_prefix())
 
 
 # ------------------------------------------------------------------ storage
@@ -208,6 +220,8 @@ def _worker() -> None:
 
 def start_worker() -> None:
     threading.Thread(target=_worker, name="pv-worker", daemon=True).start()
+    premeasure.start(f"/vsis3/{settings.media_bucket}", _cache_prefix(), converter, tsdk.available,
+                     threading.Event())
     for iid in storage.list_dirs(_prefix() + "/"):          # resume after a restart
         try:
             if _load(iid, "meta.json").get("status") in ("queued", "running"):
