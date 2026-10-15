@@ -148,6 +148,8 @@ Editing routes (mapping-tool/service/app/wpml.py, verified with Pilot 2 on RC Pr
   (seen 2026-10-15), the DJI name is only in cloud_sample.media_file.file_name. Services without DB access find
   files by content: pv pre-measurement by R-JPEG APP3 data, farming M3M bands by XMP ImageSource + CaptureUUID
   (previews named by CaptureUUID, `/api/farming/ms-preview/object.json?key=` resolves a band file).
+  Preview JSON: NDVI (PNG) plus GNDVI/NDRE when G/RE are present; recomputed when a band arrives later
+  (bands_present changed), e.g. G/RE from an SD import after R/NIR came from Pilot 2 (web patch 0030 shows them).
 - Results in bucket `mapping-results/{jobId}/`, tiles via 302 to presigned URLs (bucket stays private).
 - Test without x64 node: `python3 mapping-tool/service/tools/sim_agent.py`.
 - All simulated test geodata stays within 10 km of HOME_POINT (edge/.env, "lon,lat"); sim_agent.py and

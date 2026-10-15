@@ -1,0 +1,65 @@
+From b6a3e1dc191626416debd16a8bc29cc8ac20855d Mon Sep 17 00:00:00 2001
+From: RomaN <mason@rpi5.local>
+Date: Fri, 16 Oct 2026 00:08:15 +0200
+Subject: [PATCH] onprem: GNDVI and NDRE of complete Mavic 3M shots in the NDVI
+ dialog
+
+---
+ src/api/farming.ts            |  5 ++++-
+ src/components/MediaPanel.vue | 10 ++++++++++
+ 2 files changed, 14 insertions(+), 1 deletion(-)
+
+diff --git a/src/api/farming.ts b/src/api/farming.ts
+index 6f4a70a..6be3cb7 100644
+--- a/src/api/farming.ts
++++ b/src/api/farming.ts
+@@ -70,6 +70,8 @@ export function exportUrl (id: string, format: ExportFormat): string {
+   return `${farmingBase()}/api/farming/zonemaps/${id}/export/${format}?token=${encodeURIComponent(authToken())}`
+ }
+ 
++export interface MsStats { valid_fraction: number, mean?: number, median?: number, p05?: number, p95?: number }
++
+ // Mavic 3M NDVI quick look per shot, computed in the background from the band TIFFs (farming multispectral.py)
+ export interface MsPreview {
+   capture: string
+@@ -77,7 +79,8 @@ export interface MsPreview {
+   bands_present: string[]
+   objects: Record<string, string> // band -> object key
+   grid_scale: number
+-  stats: { valid_fraction: number, mean?: number, median?: number, p05?: number, p95?: number }
++  stats: MsStats // NDVI
++  indices?: Partial<Record<'NDVI' | 'GNDVI' | 'NDRE', MsStats>> // GNDVI needs G, NDRE needs RE
+   irradiance: Record<string, number>
+   calibration: string
+   error?: string
+diff --git a/src/components/MediaPanel.vue b/src/components/MediaPanel.vue
+index 492bddb..24edcba 100644
+--- a/src/components/MediaPanel.vue
++++ b/src/components/MediaPanel.vue
+@@ -65,6 +65,11 @@
+         <a-descriptions-item :label="$t('Median')">{{ fixed(ndviModal.preview.stats.median, 3) }}</a-descriptions-item>
+         <a-descriptions-item label="p5 - p95">{{ fixed(ndviModal.preview.stats.p05, 2) }} - {{ fixed(ndviModal.preview.stats.p95, 2) }}</a-descriptions-item>
+         <a-descriptions-item :label="$t('valid pixels')">{{ (ndviModal.preview.stats.valid_fraction * 100).toFixed(1) }} %</a-descriptions-item>
++        <a-descriptions-item v-for="name in ['GNDVI', 'NDRE'].filter(n => ndviModal.preview.indices?.[n])" :key="name"
++          :label="`${name} (${$t('Mean')})`">
++          {{ fixed(ndviModal.preview.indices[name].mean, 3) }}
++          <span class="dim-dark">{{ fixed(ndviModal.preview.indices[name].p05, 2) }} - {{ fixed(ndviModal.preview.indices[name].p95, 2) }}</span>
++        </a-descriptions-item>
+         <a-descriptions-item :label="$t('Bands')">{{ ndviModal.preview.bands_present.join(', ') }}</a-descriptions-item>
+         <a-descriptions-item :label="$t('Sunlight sensor')">
+           {{ Object.entries(ndviModal.preview.irradiance).map(([b, v]) => `${b} ${v.toFixed(0)}`).join(' \u00b7 ') }}
+@@ -324,6 +329,11 @@ function downloadMedia (media: MediaFile) {
+     background: linear-gradient(to right, rgb(215, 48, 39), rgb(215, 255, 91), rgb(26, 150, 60));
+   }
+ }
++.dim-dark {
++  margin-left: 6px;
++  font-size: 12px;
++  color: #888;
++}
+ .ndvi-note {
+   margin: 12px 0 0;
+   font-size: 12px;
+-- 
+2.47.3
+

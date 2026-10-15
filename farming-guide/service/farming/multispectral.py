@@ -18,7 +18,8 @@ XMP gives the band (ImageSource MS_<band>_CAMERA, else BandName) and the shot (C
 files of one shutter release). Output in the own bucket (prefix ms-preview/):
   objects/<sha256 of object key>.json   object seen: {key, capture, band} (capture null = not a M3M band)
   captures/<capture>/<band>             object key of that band
-  <capture>.png / <capture>.json        colour preview / statistics, bands present, calibration
+  <capture>.png / <capture>.json        NDVI colour preview / statistics of NDVI, GNDVI (G), NDRE (RE),
+                                        bands present (recomputed when a band arrives later), calibration
 """
 import hashlib
 import json
@@ -121,10 +122,7 @@ def warp(img: np.ndarray, hmatrix: np.ndarray, scale: int) -> np.ndarray:
 
 
 def ndvi(nir: np.ndarray, red: np.ndarray) -> np.ndarray:
-    with np.errstate(divide="ignore", invalid="ignore"):
-        value = (nir - red) / (nir + red)
-    value[~np.isfinite(value) | (nir + red <= 0)] = np.nan
-    return np.clip(value, -1.0, 1.0)
+    return normalized_difference(nir, red)
 
 
 def statistics(index: np.ndarray) -> dict:
@@ -273,13 +271,29 @@ def captures(out_prefix: str) -> dict[str, dict[str, str]]:
     return out
 
 
+def normalized_difference(a: np.ndarray, b: np.ndarray) -> np.ndarray:
+    """(a - b) / (a + b), NaN where undefined, clipped to -1 .. 1 (NDVI, GNDVI, NDRE)."""
+    with np.errstate(divide="ignore", invalid="ignore"):
+        value = (a - b) / (a + b)
+    value[~np.isfinite(value) | (a + b <= 0)] = np.nan
+    return np.clip(value, -1.0, 1.0)
+
+
+# index -> band subtracted from NIR; computed when that band is present
+INDICES = {"NDVI": "R", "GNDVI": "G", "NDRE": "RE"}
+
+
 def process_capture(media_root: str, out_prefix: str, capture: str, bands: dict[str, str],
                     scale: int = SCALE) -> dict:
-    nir, nir_meta = _band(f"{media_root}/{bands['NIR']}", scale)
-    red, red_meta = _band(f"{media_root}/{bands['R']}", scale)
-    nir_ref = warp(reflectance(nir, nir_meta, scale), nir_meta.hmatrix, scale)
-    red_ref = warp(reflectance(red, red_meta, scale), red_meta.hmatrix, scale)
-    index = ndvi(nir_ref, red_ref)
+    """NDVI preview (PNG) and statistics of every index the present bands allow (NIR and red required)."""
+    present = sorted(bands, key=BANDS.index)
+    ref, meta = {}, {}
+    for band in present:
+        dn, meta[band] = _band(f"{media_root}/{bands[band]}", scale)
+        ref[band] = warp(reflectance(dn, meta[band], scale), meta[band].hmatrix, scale)
+    indices = {name: statistics(normalized_difference(ref["NIR"], ref[other]))
+               for name, other in INDICES.items() if other in ref}
+    index = normalized_difference(ref["NIR"], ref["R"])
     rgb = colorize(index)
     mem = gdal.GetDriverByName("MEM").Create("", rgb.shape[2], rgb.shape[1], 3, gdal.GDT_Byte)
     for i in range(3):
@@ -288,36 +302,45 @@ def process_capture(media_root: str, out_prefix: str, capture: str, bands: dict[
     gdal.GetDriverByName("PNG").CreateCopy(png, mem)
     _write(f"{out_prefix}/{capture}.png", _read(png))
     gdal.Unlink(png)
-    result = {"capture": capture, "index": "NDVI", "bands_present": sorted(bands, key=BANDS.index),
-              "objects": {b: bands[b] for b in sorted(bands, key=BANDS.index)},
-              "grid_scale": scale, "stats": statistics(index),
-              "irradiance": {"NIR": nir_meta.irradiance, "R": red_meta.irradiance},
+    result = {"capture": capture, "index": "NDVI", "bands_present": present,
+              "objects": {b: bands[b] for b in present},
+              "grid_scale": scale, "stats": indices["NDVI"], "indices": indices,
+              "irradiance": {b: meta[b].irradiance for b in present},
               "calibration": "black level, vignetting, gain/exposure, pCam, sunlight sensor; band alignment by "
                              "CalibratedHMatrix; no dewarp"}
     _write(f"{out_prefix}/{capture}.json", json.dumps(result).encode())
     return result
 
 
+def _outdated(out_prefix: str, capture: str, bands: dict[str, str]) -> bool:
+    """True when there is no preview yet or bands arrived after it was computed (e.g. G/RE from a later upload)."""
+    try:
+        previous = json.loads(_read(f"{out_prefix}/{capture}.json"))
+    except (FileNotFoundError, ValueError):
+        return True
+    return sorted(previous.get("bands_present", [])) != sorted(bands)
+
+
 def process_pending(media_root: str, out_prefix: str, limit: int = 20, seen: set | None = None) -> int:
-    """Scan new TIFFs, then compute up to `limit` previews of captures with NIR and red. Returns the count."""
+    """Scan new TIFFs, then compute up to `limit` previews of captures with NIR and red that are new or got
+    more bands since. Returns the count."""
     scan_new(media_root, out_prefix, seen=seen)
     done = 0
     for capture, bands in sorted(captures(out_prefix).items()):
         if done >= limit:
             break
-        if "NIR" not in bands or "R" not in bands:
+        if "NIR" not in bands or "R" not in bands or not _outdated(out_prefix, capture, bands):
             continue
-        try:
-            _read(f"{out_prefix}/{capture}.json")
-            continue
-        except FileNotFoundError:
-            pass
         try:
             result = process_capture(media_root, out_prefix, capture, bands)
-            log.info("multispectral: %s NDVI mean %s", capture, result["stats"].get("mean"))
+            log.info("multispectral: %s bands %s, %s", capture, ",".join(result["bands_present"]),
+                     ", ".join(f"{k} {v.get('mean')}" for k, v in result["indices"].items()))
         except Exception as exc:  # one broken shot must not block the others
             log.warning("multispectral: %s failed: %s", capture, exc)
-            _write(f"{out_prefix}/{capture}.json", json.dumps({"capture": capture, "error": str(exc)[:200]}).encode())
+            # bands_present: a failed capture is tried again only when further bands arrive
+            _write(f"{out_prefix}/{capture}.json", json.dumps(
+                {"capture": capture, "error": str(exc)[:200], "bands_present": sorted(bands, key=BANDS.index)}
+            ).encode())
         done += 1
     return done
 

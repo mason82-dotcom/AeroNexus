@@ -127,6 +127,36 @@ class PipelineTest(unittest.TestCase):
         self.assertEqual([got[k] for k in ("wayline/org_c_3.tiff", "wayline/org_d_4.jpg", "wayline/unknown.tif")],
                          [None, None, None])
 
+    def test_green_and_red_edge_arriving_later_recompute_the_preview(self):
+        # 2026-10-15: R/NIR came from Pilot 2, G/RE of the same shots hours later from an SD import
+        band_tiff(f"{self.media}/wayline/org_n.tiff", 30000, "NIR", 5.939, 1.009263, 915.075)
+        band_tiff(f"{self.media}/wayline/org_r.tiff", 9000, "Red", 4.756, 0.526279, 993.725)
+        self.assertEqual(ms.process_pending(self.media, self.out), 1)
+        first = json.loads(ms._read(f"{self.out}/{CAP1}.json"))
+        self.assertEqual((first["bands_present"], list(first["indices"])), (["R", "NIR"], ["NDVI"]))
+        self.assertEqual(ms.process_pending(self.media, self.out), 0)            # nothing new
+        band_tiff(f"{self.media}/wayline/sdimport-X/a/DJI_x_MS_G.TIF", 12000, "Green", 6.2, 0.8, 1131.2)
+        band_tiff(f"{self.media}/wayline/sdimport-X/b/DJI_x_MS_RE.TIF", 20000, "RedEdge", 7.6, 0.9, 896.1)
+        self.assertEqual(ms.process_pending(self.media, self.out), 1)            # recomputed once
+        self.assertEqual(ms.process_pending(self.media, self.out), 0)
+        result = json.loads(ms._read(f"{self.out}/{CAP1}.json"))
+        self.assertEqual(result["bands_present"], ["G", "R", "RE", "NIR"])
+        nir = expected_ref(30000, 5.939, 1.009263, 915.075)
+        for name, ref in (("NDVI", expected_ref(9000, 4.756, 0.526279, 993.725)),
+                          ("GNDVI", expected_ref(12000, 6.2, 0.8, 1131.2)),
+                          ("NDRE", expected_ref(20000, 7.6, 0.9, 896.1))):
+            self.assertAlmostEqual(result["indices"][name]["mean"], round((nir - ref) / (nir + ref), 4), places=3)
+        self.assertEqual(result["stats"], result["indices"]["NDVI"])
+        self.assertEqual(set(result["irradiance"]), {"G", "R", "RE", "NIR"})
+
+    def test_failed_capture_is_retried_only_when_bands_arrive(self):
+        band_tiff(f"{self.media}/wayline/org_n.tiff", 30000, "NIR", 5.9, 1.0, 900.0)
+        band_tiff(f"{self.media}/wayline/org_r.tiff", 9000, "Red", 4.7, 0.5, 990.0)
+        ms.scan_new(self.media, self.out)
+        ms._write(f"{self.out}/{CAP1}.json", json.dumps({"capture": CAP1, "error": "x",
+                                                         "bands_present": ["R", "NIR"]}).encode())
+        self.assertEqual(ms.process_pending(self.media, self.out), 0)
+
     def test_band_uploaded_later_completes_the_capture(self):
         band_tiff(f"{self.media}/wayline/org_a_1.tiff", 30000, "NIR", 5.9, 1.0, 900.0)
         self.assertEqual(ms.process_pending(self.media, self.out), 0)
