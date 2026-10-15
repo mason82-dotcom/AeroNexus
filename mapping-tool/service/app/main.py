@@ -6,7 +6,9 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from . import config, db, mediaauth, missions
+import threading
+
+from . import config, db, evidence, mediaauth, missions
 from .api import build_router
 from .storage import Storage
 
@@ -33,7 +35,10 @@ storage = Storage(settings)
 async def lifespan(_app: FastAPI):
     applied = db.migrate(settings)
     log.info("database %s ready, %d migration(s) applied", settings.mysql_database, len(applied))
+    stop = threading.Event()
+    evidence.start_sealer(settings, storage, db, stop)
     yield
+    stop.set()
 
 
 app = FastAPI(title="AeroNexus Mapping", version="0.1.0", lifespan=lifespan)
@@ -50,6 +55,7 @@ app.add_middleware(
 app.include_router(build_router(settings, storage))
 app.include_router(mediaauth.build_router(settings))
 app.include_router(missions.build_router(settings))
+app.include_router(evidence.build_router(settings, storage))
 
 
 @app.get("/health")

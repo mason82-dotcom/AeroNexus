@@ -169,3 +169,10 @@ Editing routes (mapping-tool/service/app/wpml.py, verified with Pilot 2 on RC Pr
 - Visible crop: sibling `_V`/`_W`/`_Z` with the same index and a time stamp up to +-2 s (Pilot 2 often stamps the
   visible photo 1 s later); thermal raw pixel -> visible by f35 * diagonal ratio (EXIF 0xA405). Parallax makes the
   frame approximate at short range. PDF report: own minimal writer pv/pdf.py (Helvetica WinAnsi, DCT images).
+
+## Evidence register
+- `mapping-tool/service/app/evidence.py`, table `evidence_record` (migration 0005). Sealer thread in the
+  mapping service (60 s, batches of 20, MySQL GET_LOCK so only one chain writer). Never UPDATE/DELETE rows:
+  that is exactly what verify_chain() detects. Changing the canonical form needs a new FORMAT tag, old rows
+  keep verifying with the old one.
+- First run 2026-10-15: 46 of 46 media sealed, chain ok; sample hash matched `sha256sum` of the MinIO backup copy.
