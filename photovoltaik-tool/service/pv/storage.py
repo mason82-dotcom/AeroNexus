@@ -32,6 +32,20 @@ def read(path: str) -> bytes:
         gdal.VSIFCloseL(f)
 
 
+def read_head(path: str, size: int) -> bytes:
+    """First `size` bytes of an object (a range request on /vsis3/)."""
+    try:
+        f = gdal.VSIFOpenL(path, "rb")
+    except RuntimeError as exc:
+        raise NotFound(path) from exc
+    if f is None:
+        raise NotFound(path)
+    try:
+        return gdal.VSIFReadL(1, size, f)
+    finally:
+        gdal.VSIFCloseL(f)
+
+
 def list_dirs(prefix: str) -> list[str]:
     return [d.rstrip("/") for d in (gdal.ReadDir(prefix) or [])]
 

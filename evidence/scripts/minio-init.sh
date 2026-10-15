@@ -32,13 +32,15 @@ mc admin policy create local mapping-rw /tmp/mapping-policy.json || true
 mc admin user add local "$MAPPING_MINIO_USER" "$MAPPING_MINIO_PASSWORD"
 mc admin policy attach local mapping-rw --user "$MAPPING_MINIO_USER" || true
 
-# Farming Guide: own bucket for zone maps/exports, read access to the mapping results (index COGs)
+# Farming Guide: own bucket for zone maps/exports/multispectral previews, read access to the mapping
+# results (index COGs) and to the Pilot 2 uploads (Mavic 3M band TIFFs)
 mc mb --ignore-existing "local/$FARMING_BUCKET"
 cat > /tmp/farming-policy.json <<POL
 { "Version": "2012-10-17",
   "Statement": [
     { "Effect": "Allow", "Action": ["s3:GetObject", "s3:ListBucket"],
-      "Resource": ["arn:aws:s3:::$MAPPING_RESULTS_BUCKET", "arn:aws:s3:::$MAPPING_RESULTS_BUCKET/*"] },
+      "Resource": ["arn:aws:s3:::$MAPPING_RESULTS_BUCKET", "arn:aws:s3:::$MAPPING_RESULTS_BUCKET/*",
+                   "arn:aws:s3:::$MINIO_BUCKET", "arn:aws:s3:::$MINIO_BUCKET/*"] },
     { "Effect": "Allow", "Action": ["s3:*"],
       "Resource": ["arn:aws:s3:::$FARMING_BUCKET", "arn:aws:s3:::$FARMING_BUCKET/*"] } ] }
 POL

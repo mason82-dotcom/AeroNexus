@@ -16,7 +16,8 @@ class Settings:
     jwt_secret: str
     mapping_url: str            # internal URL of the mapping service (layer lookup with the user's token)
     results_bucket: str         # mapping results (index COGs), read only
-    bucket: str                 # own bucket for zone maps and exports
+    bucket: str                 # own bucket for zone maps, exports and multispectral previews
+    media_bucket: str           # Pilot 2 uploads (read only): Mavic 3M band TIFFs
     web_origin: str             # browser origin of the web UI (CORS)
 
 
@@ -31,5 +32,6 @@ def load() -> Settings:
         mapping_url=_env("MAPPING_URL", "http://mapping:6790").rstrip("/"),
         results_bucket=_env("MAPPING_RESULTS_BUCKET", "mapping-results"),
         bucket=_env("FARMING_BUCKET", "farming"),
+        media_bucket=_env("MINIO_BUCKET", "dji-cloud"),
         web_origin=_env("WEB_ORIGIN", "*"),
     )

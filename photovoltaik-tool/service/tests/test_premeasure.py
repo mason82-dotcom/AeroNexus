@@ -45,14 +45,21 @@ class PremeasureTest(unittest.TestCase):
         self.assertEqual(len(self.sdk.calls), 3)
 
     def test_pending_thermal_images_are_measured_once(self):
+        # Pilot 2 stores some uploads as org_<hash>_<ms>.jpg (2026-10-15): R-JPEGs are found by content
         storage.write(f"{self.media}/wayline/DJI_0001_T.JPG", self.jpeg)
+        storage.write(f"{self.media}/wayline/org_6f5beeb07246091b_1792065788000.jpg", self.jpeg)
         storage.write(f"{self.media}/wayline/DJI_0001_V.JPG", b"visible")
         storage.write(f"{self.media}/wayline/DJI_0002_T.JPG", b"not an r-jpeg")
-        self.assertEqual(premeasure.thermal_keys(self.media),
-                         ["wayline/DJI_0001_T.JPG", "wayline/DJI_0002_T.JPG"])
-        self.assertEqual(premeasure.premeasure_pending(self.media, self.cache, self.convert), 1)
+        storage.write(f"{self.media}/wayline/route.kmz", self.jpeg)
+        self.assertEqual(premeasure.jpeg_keys(self.media),
+                         ["wayline/DJI_0001_T.JPG", "wayline/DJI_0001_V.JPG", "wayline/DJI_0002_T.JPG",
+                          "wayline/org_6f5beeb07246091b_1792065788000.jpg"])
+        self.assertEqual(premeasure.premeasure_pending(self.media, self.cache, self.convert), 2)
         self.assertEqual(premeasure.premeasure_pending(self.media, self.cache, self.convert), 0)
-        self.assertEqual(len(self.sdk.calls), 1)
+        self.assertEqual(len(self.sdk.calls), 1)                   # same image twice: second is a cache hit
+
+    def test_rjpeg_is_recognised_from_the_head(self):
+        self.assertTrue(rjpeg.is_rjpeg(self.jpeg[:premeasure.HEAD_BYTES]))
 
     def test_inspection_with_defaults_reuses_the_premeasured_matrix(self):
         storage.write(f"{self.media}/wayline/DJI_0001_T.JPG", self.jpeg)

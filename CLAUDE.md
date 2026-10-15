@@ -138,6 +138,10 @@ Editing routes (mapping-tool/service/app/wpml.py, verified with Pilot 2 on RC Pr
   by the one-shot `mapping-db-init` (mysql image) on every start; needs SELECT grants for each new
   cloud_sample table the service reads. Auth: DJI JWT (x-auth-token)
   for the web, `MAPPING_AGENT_TOKEN` bearer for the compute agent. Agent API: mapping-tool/docs/agent-api.md.
+- Object keys of Pilot 2 uploads are not reliable DJI names: some land as `wayline/org_<hash>_<ms>.<ext>`
+  (seen 2026-10-15), the DJI name is only in cloud_sample.media_file.file_name. Services without DB access find
+  files by content: pv pre-measurement by R-JPEG APP3 data, farming M3M bands by XMP ImageSource + CaptureUUID
+  (previews named by CaptureUUID, `/api/farming/ms-preview/object.json?key=` resolves a band file).
 - Results in bucket `mapping-results/{jobId}/`, tiles via 302 to presigned URLs (bucket stays private).
 - Test without x64 node: `python3 mapping-tool/service/tools/sim_agent.py`.
 - All simulated test geodata stays within 10 km of HOME_POINT (edge/.env, "lon,lat"); sim_agent.py and

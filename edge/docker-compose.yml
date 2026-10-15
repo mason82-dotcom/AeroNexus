@@ -250,6 +250,7 @@ services:
     environment:
       JWT_SECRET: ${JWT_SECRET}
       MAPPING_URL: http://mapping:6790
+      MINIO_BUCKET: ${MINIO_BUCKET}   # Pilot 2 uploads, read only (Mavic 3M band TIFFs)
       AWS_S3_ENDPOINT: minio:9000
       AWS_ACCESS_KEY_ID: ${FARMING_MINIO_USER}
       AWS_SECRET_ACCESS_KEY: ${FARMING_MINIO_PASSWORD}
