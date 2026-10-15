@@ -1,0 +1,64 @@
+From 05288c230f841029876b4134173ea9ef560e61c7 Mon Sep 17 00:00:00 2001
+From: RomaN <mason@rpi5.local>
+Date: Thu, 15 Oct 2026 19:33:50 +0200
+Subject: [PATCH] onprem: log the Pilot 2 media upload steps (tiny
+ fingerprints, fast upload, callbacks)
+
+---
+ .../sample/media/controller/MediaController.java    | 13 ++++++++++++-
+ 1 file changed, 12 insertions(+), 1 deletion(-)
+
+diff --git a/sample/src/main/java/com/dji/sample/media/controller/MediaController.java b/sample/src/main/java/com/dji/sample/media/controller/MediaController.java
+index ec21a54..2fc25ce 100644
+--- a/sample/src/main/java/com/dji/sample/media/controller/MediaController.java
++++ b/sample/src/main/java/com/dji/sample/media/controller/MediaController.java
+@@ -12,6 +12,7 @@ import javax.servlet.http.HttpServletRequest;
+ import javax.servlet.http.HttpServletResponse;
+ import javax.validation.Valid;
+ import java.util.List;
++import java.util.stream.Collectors;
+ 
+ /**
+  * @author sean
+@@ -34,7 +35,9 @@ public class MediaController implements IHttpMediaService {
+     @Override
+     public HttpResultResponse mediaFastUpload(String workspaceId, @Valid MediaFastUploadRequest request, HttpServletRequest req, HttpServletResponse rsp) {
+         boolean isExist = mediaService.fastUpload(workspaceId, request.getFingerprint());
+-
++        // onprem: trace of the Pilot 2 upload steps (why files are skipped or never arrive)
++        log.info("pilot media fast-upload: name={} path={} fingerprint={} ext={} -> {}", request.getName(),
++                request.getPath(), request.getFingerprint(), request.getExt(), isExist ? "exists" : "upload needed");
+         return isExist ? HttpResultResponse.success() : HttpResultResponse.error(request.getFingerprint() + "don't exist.");
+     }
+ 
+@@ -47,6 +50,8 @@ public class MediaController implements IHttpMediaService {
+      */
+     @Override
+     public HttpResultResponse<String> mediaUploadCallback(String workspaceId, @Valid MediaUploadCallbackRequest request, HttpServletRequest req, HttpServletResponse rsp) {
++        log.info("pilot media upload-callback: name={} path={} object_key={} fingerprint={}", request.getName(),
++                request.getPath(), request.getObjectKey(), request.getFingerprint());
+         mediaService.saveMediaFile(workspaceId, request);
+         return HttpResultResponse.success(request.getObjectKey());
+     }
+@@ -61,11 +66,17 @@ public class MediaController implements IHttpMediaService {
+     @Override
+     public HttpResultResponse<GetFileFingerprintResponse> getExistFileTinyFingerprint(String workspaceId, @Valid GetFileFingerprintRequest request, HttpServletRequest req, HttpServletResponse rsp) {
+         List<String> existingList = mediaService.getExistTinyFingerprints(workspaceId, request.getTinyFingerprints());
++        List<String> asked = request.getTinyFingerprints();
++        log.info("pilot media tiny-fingerprints: asked {}, already on server {}, new {}: {}",
++                asked == null ? 0 : asked.size(), existingList.size(),
++                asked == null ? 0 : asked.size() - existingList.size(),
++                asked == null ? "[]" : asked.stream().filter(f -> !existingList.contains(f)).collect(Collectors.toList()));
+         return HttpResultResponse.success(new GetFileFingerprintResponse().setTinyFingerprints(existingList));
+     }
+ 
+     @Override
+     public HttpResultResponse folderUploadCallback(String workspaceId, @Valid FolderUploadCallbackRequest request, HttpServletRequest req, HttpServletResponse rsp) {
++        log.info("pilot media group-upload-callback (not handled): {}", request);
+         return null;
+     }
+ }
+\ No newline at end of file
+-- 
+2.47.3
+
