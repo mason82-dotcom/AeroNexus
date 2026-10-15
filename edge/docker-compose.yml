@@ -85,7 +85,13 @@ services:
       # browser access (COG/PMTiles range requests, mapping layers) only from the web UI origin
       MINIO_API_CORS_ALLOW_ORIGIN: http://${SERVER_HOST}:8085
     volumes:
-      - ./data/minio:/data
+      # MINIO_DATA_DIR in .env (default ./data/minio). create_host_path false: if the disk is not mounted the
+      # directory is missing and MinIO refuses to start instead of serving an empty store on the SD card.
+      - type: bind
+        source: ${MINIO_DATA_DIR:-./data/minio}
+        target: /data
+        bind:
+          create_host_path: false
     ports:
       - "9000:9000"     # S3 API (Pilot 2 uploads directly here)
       - "127.0.0.1:9001:9001"     # MinIO console, server only (ssh -L 9001:localhost:9001 ...)

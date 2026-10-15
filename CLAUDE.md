@@ -15,6 +15,9 @@ Self-hosted drone platform on DJI Cloud API (DJI Pilot 2 -> own server). Monorep
   `com.centurylinklabs.watchtower.enable: "false"` (x-restart anchor in edge/docker-compose.yml); keep it on new services.
 - Secrets only in `edge/.env` (gitignored). `edge/.env.example` is the committed template.
 - Generated files live in `edge/runtime/` (gitignored), data in `edge/data/`, logs in `edge/logs/`.
+  Exception: MinIO data at `MINIO_DATA_DIR` (.env, default ./data/minio; on the dev Pi the Lexar NVMe
+  /mnt/hc4backup/aeronexus-data/minio since 2026-10-15). Bind with create_host_path false: an unmounted disk
+  stops MinIO instead of starting it empty on the SD card. Keep it that way for any new data path.
   Backup: `edge/backup.sh` (daily cron) -> BACKUP_DIR; `edge/restore.sh --test` verifies a restore in
   throwaway containers. A new database must be added to DATABASES (backup.sh) and the schema list in
   restore.sh; MinIO buckets are discovered automatically.
