@@ -9,7 +9,7 @@ from datetime import datetime, timezone
 from fastapi import APIRouter, Depends, Header, HTTPException, Query, Response
 from fastapi.responses import RedirectResponse
 
-from . import db
+from . import db, ingest
 from .auth import User, agent_dependency, tile_user_dependency, user_dependency
 from .config import Settings
 from .models import PROFILES, MetaRequest, Claim, Complete, Fail, Heartbeat, JobCreate, PlanPreview, RouteCopy, UploadUrls, AgentRef
@@ -123,27 +123,7 @@ def build_router(settings: Settings, storage: Storage) -> APIRouter:
              "create_time": _iso(datetime.fromtimestamp(r["create_time"] / 1000, tz=timezone.utc).replace(tzinfo=None))} for r in rows]}
 
     def read_meta(row: dict) -> dict:
-        """EXIF/XMP from the first 256 KB (range read); whole file only if the head is not enough."""
-        stat = storage.internal.stat_object(settings.media_bucket, row["object_key"])
-        resp = storage.internal.get_object(settings.media_bucket, row["object_key"], offset=0,
-                                           length=min(mediameta.HEAD_BYTES, stat.size))
-        try:
-            head = resp.read()
-        finally:
-            resp.close()
-            resp.release_conn()
-        try:
-            meta = mediameta.extract(head, stat.size, row["file_name"])
-        except Exception:
-            meta = None
-        if meta is None or meta["width"] is None or meta["captured"] is None:
-            resp = storage.internal.get_object(settings.media_bucket, row["object_key"])
-            try:
-                meta = mediameta.extract(resp.read(), stat.size, row["file_name"])
-            finally:
-                resp.close()
-                resp.release_conn()
-        return meta
+        return ingest.read_meta(settings, storage, row)
 
     @router.post("/media/meta")
     def media_meta(body: MetaRequest, user: User = Depends(current_user)) -> dict:

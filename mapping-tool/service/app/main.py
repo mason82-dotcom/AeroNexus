@@ -8,7 +8,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 import threading
 
-from . import config, db, evidence, mediaauth, missions
+from . import config, db, evidence, ingest, mediaauth, missions
 from .api import build_router
 from .storage import Storage
 
@@ -37,6 +37,7 @@ async def lifespan(_app: FastAPI):
     log.info("database %s ready, %d migration(s) applied", settings.mysql_database, len(applied))
     stop = threading.Event()
     evidence.start_sealer(settings, storage, db, stop)
+    ingest.start(settings, storage, db, stop)
     yield
     stop.set()
 
@@ -56,6 +57,7 @@ app.include_router(build_router(settings, storage))
 app.include_router(mediaauth.build_router(settings))
 app.include_router(missions.build_router(settings))
 app.include_router(evidence.build_router(settings, storage))
+app.include_router(ingest.build_router(settings))
 
 
 @app.get("/health")
