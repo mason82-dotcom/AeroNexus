@@ -1,7 +1,8 @@
 """Mavic 3M previews in the web API (computed in the background by multispectral.py).
 
 A preview is named by the CaptureUUID of its shot. The web knows the object keys of the media list, so
-/ms-preview/object.json?key=<object key> resolves any band file of a shot to its preview.
+/ms-preview/object.json?key=<object key> resolves any band file of a shot to its preview, POST
+/ms-preview/objects does it for a page of the media list ({"keys": [...]} -> {key: preview or null}).
 """
 import json
 import re
@@ -45,6 +46,14 @@ def preview_by_object(req, user):
     if not record.get("capture"):
         raise HttpError(404, "Keine Multispektral-Aufnahme")
     return 200, json.loads(_load(f"{_prefix()}/{record['capture']}.json"))
+
+
+@route("POST", "/api/farming/ms-preview/objects")
+def previews_by_objects(req, user):
+    keys = (req.json() or {}).get("keys")
+    if not isinstance(keys, list) or len(keys) > 200 or not all(isinstance(k, str) and 0 < len(k) <= 512 for k in keys):
+        raise HttpError(400, "keys: Liste mit bis zu 200 Objekt-Schl\u00fcsseln erwartet")
+    return 200, multispectral.previews_for(_prefix(), keys)
 
 
 @route("GET", "/api/farming/ms-preview/{capture}.json")

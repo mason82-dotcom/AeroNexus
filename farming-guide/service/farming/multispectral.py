@@ -211,6 +211,27 @@ def object_record(out_prefix: str, key: str) -> dict:
     return json.loads(_read(_object_marker(out_prefix, key)))
 
 
+def previews_for(out_prefix: str, keys: list[str]) -> dict[str, dict | None]:
+    """{object key: preview JSON of its capture, or None (no M3M band, not scanned yet, preview pending)}."""
+    out: dict[str, dict | None] = {}
+    loaded: dict[str, dict | None] = {}
+    for key in dict.fromkeys(keys):
+        out[key] = None
+        if not key.lower().endswith(_TIFF_EXT):
+            continue
+        try:
+            capture = object_record(out_prefix, key).get("capture")
+        except (FileNotFoundError, ValueError):
+            continue
+        if capture and capture not in loaded:
+            try:
+                loaded[capture] = json.loads(_read(f"{out_prefix}/{capture}.json"))
+            except (FileNotFoundError, ValueError):
+                loaded[capture] = None
+        out[key] = loaded.get(capture) if capture else None
+    return out
+
+
 def scan_new(media_root: str, out_prefix: str, limit: int = SCAN_LIMIT, seen: set | None = None) -> int:
     """Read the XMP of up to `limit` TIFFs not seen before and file the M3M bands by capture. Returns the count."""
     seen = set() if seen is None else seen

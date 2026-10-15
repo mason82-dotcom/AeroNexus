@@ -1,0 +1,255 @@
+From f017c84e24414a35328606f69599520e84ebf0a5 Mon Sep 17 00:00:00 2001
+From: RomaN <mason@rpi5.local>
+Date: Thu, 15 Oct 2026 18:56:39 +0200
+Subject: [PATCH] onprem: NDVI quick look of Mavic 3M shots in the media list
+
+---
+ src/api/farming.ts            | 24 ++++++++++
+ src/components/MediaPanel.vue | 84 ++++++++++++++++++++++++++++++++++-
+ src/locales/de.ts             |  9 ++++
+ 3 files changed, 116 insertions(+), 1 deletion(-)
+
+diff --git a/src/api/farming.ts b/src/api/farming.ts
+index 0ac9f18..6f4a70a 100644
+--- a/src/api/farming.ts
++++ b/src/api/farming.ts
+@@ -69,3 +69,27 @@ export async function deleteZoneMap (id: string): Promise<void> {
+ export function exportUrl (id: string, format: ExportFormat): string {
+   return `${farmingBase()}/api/farming/zonemaps/${id}/export/${format}?token=${encodeURIComponent(authToken())}`
+ }
++
++// Mavic 3M NDVI quick look per shot, computed in the background from the band TIFFs (farming multispectral.py)
++export interface MsPreview {
++  capture: string
++  index: 'NDVI'
++  bands_present: string[]
++  objects: Record<string, string> // band -> object key
++  grid_scale: number
++  stats: { valid_fraction: number, mean?: number, median?: number, p05?: number, p95?: number }
++  irradiance: Record<string, number>
++  calibration: string
++  error?: string
++}
++
++// object key of a media file -> preview of its shot (null: not a M3M band or not computed yet)
++export async function getMsPreviews (keys: string[]): Promise<Record<string, MsPreview | null>> {
++  if (!keys.length) return {}
++  return (await http.post('/api/farming/ms-preview/objects', { keys })).data
++}
++
++// <img src>: the token goes into the query string
++export function msPreviewPngUrl (capture: string): string {
++  return `${farmingBase()}/api/farming/ms-preview/${capture}.png?token=${encodeURIComponent(authToken())}`
++}
+diff --git a/src/components/MediaPanel.vue b/src/components/MediaPanel.vue
+index f84a033..492bddb 100644
+--- a/src/components/MediaPanel.vue
++++ b/src/components/MediaPanel.vue
+@@ -11,7 +11,13 @@
+           </a-tooltip>
+         </template>
+         <template #preview="{ record }">
+-          <img v-if="hasThumbnail(record.file_name)" class="thumb" loading="lazy" :alt="record.file_name"
++          <a-tooltip v-if="ndvi[record.object_key]?.stats?.mean !== undefined" :title="$t('Click for the NDVI preview')">
++            <div class="ndvi-thumb" @click="openNdvi(record)">
++              <img class="thumb" loading="lazy" :alt="record.file_name" :src="msPreviewPngUrl(ndvi[record.object_key].capture)" />
++              <span class="ndvi-badge">NDVI {{ ndvi[record.object_key].stats.mean.toFixed(2) }}</span>
++            </div>
++          </a-tooltip>
++          <img v-else-if="hasThumbnail(record.file_name)" class="thumb" loading="lazy" :alt="record.file_name"
+                :src="thumbnailUrl(record.file_id)" />
+           <VideoCameraOutlined v-else-if="/\.(mp4|mov)$/i.test(record.file_name)" class="fz20" />
+         </template>
+@@ -48,6 +54,26 @@
+       </a-table>
+     </div>
+   </a-spin>
++  <a-modal v-model:visible="ndviModal.visible" :title="$t('NDVI preview (Mavic 3M)')" :footer="null" width="760px">
++    <template v-if="ndviModal.preview">
++      <img class="ndvi-large" :alt="ndviModal.fileName" :src="msPreviewPngUrl(ndviModal.preview.capture)" />
++      <div class="ndvi-legend">
++        <span>-0.2</span><div class="ndvi-ramp"></div><span>0.9</span>
++      </div>
++      <a-descriptions size="small" :column="2" bordered>
++        <a-descriptions-item :label="$t('Mean')">{{ fixed(ndviModal.preview.stats.mean, 3) }}</a-descriptions-item>
++        <a-descriptions-item :label="$t('Median')">{{ fixed(ndviModal.preview.stats.median, 3) }}</a-descriptions-item>
++        <a-descriptions-item label="p5 - p95">{{ fixed(ndviModal.preview.stats.p05, 2) }} - {{ fixed(ndviModal.preview.stats.p95, 2) }}</a-descriptions-item>
++        <a-descriptions-item :label="$t('valid pixels')">{{ (ndviModal.preview.stats.valid_fraction * 100).toFixed(1) }} %</a-descriptions-item>
++        <a-descriptions-item :label="$t('Bands')">{{ ndviModal.preview.bands_present.join(', ') }}</a-descriptions-item>
++        <a-descriptions-item :label="$t('Sunlight sensor')">
++          {{ Object.entries(ndviModal.preview.irradiance).map(([b, v]) => `${b} ${v.toFixed(0)}`).join(' \u00b7 ') }}
++        </a-descriptions-item>
++        <a-descriptions-item :label="$t('Shot')" :span="2">{{ ndviModal.fileName.replace(/_MS_\w+\.TIF$/i, '') }}</a-descriptions-item>
++      </a-descriptions>
++      <p class="ndvi-note">{{ $t('Quick look without orthomosaic: reflectance-calibrated, bands aligned, lens distortion not removed.') }}</p>
++    </template>
++  </a-modal>
+ </template>
+ 
+ <script setup lang="ts">
+@@ -61,6 +87,7 @@ import { downloadFile } from '../utils/common'
+ import { downloadMediaFile, getMediaFiles } from '/@/api/media'
+ import { DownloadOutlined, VideoCameraOutlined } from '@ant-design/icons-vue'
+ import { MediaMeta, authToken, getMediaMeta, mappingBase } from '/@/api/mapping'
++import { MsPreview, getMsPreviews, msPreviewPngUrl } from '/@/api/farming'
+ 
+ // onprem: photo parameters (EXIF + DJI XMP) from the mapping service
+ function fixed (v: number | null | undefined, digits: number): string {
+@@ -180,9 +207,24 @@ interface MediaFile {
+   file_path: string,
+   create_time: string,
+   file_id: string,
++  object_key: string,
+   meta?: MediaMeta | null,
+ }
+ 
++// onprem: NDVI quick look of Mavic 3M shots (farming service), shown on the band TIFF rows
++const ndvi = ref<Record<string, MsPreview | null>>({})
++const ndviModal = reactive({ visible: false, fileName: '', preview: null as MsPreview | null })
++function openNdvi (media: MediaFile) {
++  ndviModal.preview = ndvi.value[media.object_key] || null
++  ndviModal.fileName = media.file_name
++  ndviModal.visible = !!ndviModal.preview
++}
++function loadNdvi (files: MediaFile[]) {
++  const keys = files.filter(m => /\.tiff?$/i.test(m.object_key || '')).map(m => m.object_key)
++  getMsPreviews(keys).then(res => { ndvi.value = res })
++    .catch(() => message.warning(t('NDVI preview not available (farming service not reachable)')))
++}
++
+ const mediaData = reactive({
+   data: [] as MediaFile[]
+ })
+@@ -196,6 +238,7 @@ function getFiles () {
+     mediaData.data = res.data.list
+     paginationProp.total = res.data.pagination.total
+     paginationProp.current = res.data.pagination.page
++    loadNdvi(mediaData.data)
+     getMediaMeta(mediaData.data.map((m: MediaFile) => m.file_id)).then(meta => {
+       mediaData.data = mediaData.data.map((m: MediaFile) => ({ ...m, meta: meta[m.file_id] }))
+     }).catch(() => message.warning(t('Photo parameters not available (mapping service not reachable)')))
+@@ -238,6 +281,22 @@ function downloadMedia (media: MediaFile) {
+     border-radius: 2px;
+     background: #2a2a2a;
+   }
++  .ndvi-thumb {
++    position: relative;
++    display: inline-block;
++    cursor: pointer;
++  }
++  .ndvi-badge {
++    position: absolute;
++    left: 2px;
++    bottom: 2px;
++    padding: 0 4px;
++    font-size: 11px;
++    line-height: 16px;
++    color: #fff;
++    background: rgba(0, 0, 0, 0.65);
++    border-radius: 2px;
++  }
+   .media-table {
+     background: #fff;
+     margin-top: 10px;
+@@ -247,6 +306,29 @@ function downloadMedia (media: MediaFile) {
+     cursor: pointer;
+   }
+ }
++.ndvi-large {
++  width: 100%;
++  border-radius: 2px;
++  background: #000;
++}
++.ndvi-legend {
++  display: flex;
++  align-items: center;
++  gap: 8px;
++  margin: 8px 0 12px;
++  font-size: 12px;
++  .ndvi-ramp {
++    flex: 1;
++    height: 10px;
++    border-radius: 2px;
++    background: linear-gradient(to right, rgb(215, 48, 39), rgb(215, 255, 91), rgb(26, 150, 60));
++  }
++}
++.ndvi-note {
++  margin: 12px 0 0;
++  font-size: 12px;
++  color: #888;
++}
+ .header {
+   width: 100%;
+   height: 60px;
+diff --git a/src/locales/de.ts b/src/locales/de.ts
+index bf17b39..9738f44 100644
+--- a/src/locales/de.ts
++++ b/src/locales/de.ts
+@@ -36,6 +36,7 @@ export default {
+   "Available": "Verfügbar",
+   "Avaliable": "Verfügbar",
+   "Back to home": "Zur Startseite",
++  "Bands": "Bänder",
+   "Before starting manually, please select the publish mode and livestream type": "Vor dem manuellen Start bitte Veröffentlichungsmodus und Stream-Typ wählen.",
+   "Bind": "Binden",
+   "bind failed:": "Bindung fehlgeschlagen:",
+@@ -60,6 +61,7 @@ export default {
+   "Circular GEO Zone": "Kreisförmige Sperrzone",
+   "Circular Task Area": "Kreisförmiges Einsatzgebiet",
+   "Classes": "Klassen",
++  "Click for the NDVI preview": "Klicken für die NDVI-Vorschau",
+   "Click to Upload": "Zum Hochladen klicken",
+   "Cloud API Demo": "AeroNexus Control",
+   "Color:": "Farbe:",
+@@ -239,6 +241,7 @@ export default {
+   "Media File Upload": "Medien-Upload",
+   "Media Files": "Mediendateien",
+   "median": "Median",
++  "Median": "Median",
+   "Method": "Methode",
+   "Min. area (m2)": "Mindestfläche (m²)",
+   "Mine": "Eigene",
+@@ -256,6 +259,8 @@ export default {
+   "Name": "Name",
+   "Name of the copy": "Name der Kopie",
+   "Name:": "Name:",
++  "NDVI preview (Mavic 3M)": "NDVI-Vorschau (Mavic 3M)",
++  "NDVI preview not available (farming service not reachable)": "NDVI-Vorschau nicht verfügbar (Farming-Dienst nicht erreichbar)",
+   "Network State": "Netzwerkstatus",
+   "New job": "Neuer Auftrag",
+   "New mapping job": "Neuer Kartierungsauftrag",
+@@ -309,6 +314,7 @@ export default {
+   "Preview Photo": "Vorschaubild",
+   "Product, e.g. KAS 27": "Produkt, z. B. KAS 27",
+   "Profile": "Profil",
++  "Quick look without orthomosaic: reflectance-calibrated, bands aligned, lens distortion not removed.": "Schnellansicht ohne Orthomosaik: auf Reflexion kalibriert, Bänder überlagert, Objektivverzeichnung nicht entfernt.",
+   "Rainfall": "Niederschlag",
+   "Rates saved": "Mengen gespeichert",
+   "RC Battery Level": "Akku Fernsteuerung",
+@@ -359,6 +365,7 @@ export default {
+   "Set the clarity to ": "Qualität gesetzt auf ",
+   "Settings": "Einstellungen",
+   "Shapefile": "Shapefile",
++  "Shot": "Aufnahme",
+   "Show on map / edit": "Auf Karte zeigen / bearbeiten",
+   "Signal strength": "Signalstärke",
+   "Size": "Größe",
+@@ -381,6 +388,7 @@ export default {
+   "Stop Recording": "Aufnahme stoppen",
+   "Stop Recording successfully": "Aufnahme gestoppt",
+   "success": "Erfolgreich",
++  "Sunlight sensor": "Sonnenlicht-Sensor",
+   "Super Clear": "Sehr scharf",
+   "Suspend": "Pausieren",
+   "Suspended successfully": "Pausiert",
+@@ -428,6 +436,7 @@ export default {
+   "used": "belegt",
+   "User Type": "Benutzertyp",
+   "Username": "Benutzername",
++  "valid pixels": "gültige Pixel",
+   "Vertical Speed": "Vertikalgeschwindigkeit",
+   "Video Bit Rate:": "Video-Bitrate:",
+   "Waiting to upload": "Wartet auf Upload",
+-- 
+2.47.3
+

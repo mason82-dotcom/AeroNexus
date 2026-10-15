@@ -115,6 +115,18 @@ class PipelineTest(unittest.TestCase):
         png = gdal.Open(f"{self.out}/{CAP1}.png")
         self.assertEqual((png.RasterXSize, png.RasterYSize, png.RasterCount), (40, 30, 3))
 
+    def test_previews_for_a_page_of_the_media_list(self):
+        band_tiff(f"{self.media}/wayline/org_a_1.tiff", 30000, "NIR", 5.9, 1.0, 900.0)
+        band_tiff(f"{self.media}/wayline/org_b_2.tiff", 9000, "Red", 4.7, 0.5, 990.0)
+        band_tiff(f"{self.media}/wayline/org_c_3.tiff", 30000, "NIR", 5.9, 1.0, 900.0, capture=CAP2)  # no red
+        ms.process_pending(self.media, self.out)
+        got = ms.previews_for(self.out, ["wayline/org_a_1.tiff", "wayline/org_b_2.tiff", "wayline/org_c_3.tiff",
+                                         "wayline/org_d_4.jpg", "wayline/unknown.tif"])
+        self.assertEqual(got["wayline/org_a_1.tiff"]["capture"], CAP1)
+        self.assertIs(got["wayline/org_a_1.tiff"], got["wayline/org_b_2.tiff"])      # one read per capture
+        self.assertEqual([got[k] for k in ("wayline/org_c_3.tiff", "wayline/org_d_4.jpg", "wayline/unknown.tif")],
+                         [None, None, None])
+
     def test_band_uploaded_later_completes_the_capture(self):
         band_tiff(f"{self.media}/wayline/org_a_1.tiff", 30000, "NIR", 5.9, 1.0, 900.0)
         self.assertEqual(ms.process_pending(self.media, self.out), 0)
