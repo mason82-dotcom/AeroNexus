@@ -173,6 +173,8 @@ services:
       RTSP_PASSWORD: ${RTSP_PASSWORD}
       NTP_SERVER: ${NTP_SERVER}
       LOG_LEVEL: ${LOG_LEVEL}
+      # file types Pilot 2 must not upload (fast-upload answers "exists"), e.g. dng,mp4; empty = all
+      PILOT_SKIP_UPLOAD_EXT: ${PILOT_SKIP_UPLOAD_EXT:-}
       TZ: Europe/Berlin
     volumes:
       - ../api/docker/application.yml:/app/config/application.yml:ro

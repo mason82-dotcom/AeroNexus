@@ -1,0 +1,68 @@
+From 7ad3516bba6b10c8820b782c177b3508ac26d2cb Mon Sep 17 00:00:00 2001
+From: RomaN <mason@rpi5.local>
+Date: Thu, 15 Oct 2026 23:55:31 +0200
+Subject: [PATCH] onprem: skip configured file types on Pilot 2 upload
+ (PILOT_SKIP_UPLOAD_EXT)
+
+---
+ .../media/controller/MediaController.java     | 24 +++++++++++++++++++
+ 1 file changed, 24 insertions(+)
+
+diff --git a/sample/src/main/java/com/dji/sample/media/controller/MediaController.java b/sample/src/main/java/com/dji/sample/media/controller/MediaController.java
+index 2fc25ce..bca5fa9 100644
+--- a/sample/src/main/java/com/dji/sample/media/controller/MediaController.java
++++ b/sample/src/main/java/com/dji/sample/media/controller/MediaController.java
+@@ -6,12 +6,15 @@ import com.dji.sdk.cloudapi.media.api.IHttpMediaService;
+ import com.dji.sdk.common.HttpResultResponse;
+ import lombok.extern.slf4j.Slf4j;
+ import org.springframework.beans.factory.annotation.Autowired;
++import org.springframework.beans.factory.annotation.Value;
+ import org.springframework.web.bind.annotation.RestController;
+ 
+ import javax.servlet.http.HttpServletRequest;
+ import javax.servlet.http.HttpServletResponse;
+ import javax.validation.Valid;
++import java.util.Arrays;
+ import java.util.List;
++import java.util.Locale;
+ import java.util.stream.Collectors;
+ 
+ /**
+@@ -26,6 +29,22 @@ public class MediaController implements IHttpMediaService {
+     @Autowired
+     private IMediaService mediaService;
+ 
++    /**
++     * onprem: file extensions Pilot 2 must not upload (PILOT_SKIP_UPLOAD_EXT, e.g. "dng,mp4"; empty = all).
++     * fast-upload answers "exists" for them, so Pilot 2 marks the file as done and does not transfer it.
++     */
++    @Value("${PILOT_SKIP_UPLOAD_EXT:}")
++    private String skipUploadExt;
++
++    private boolean skipUpload(String name) {
++        if (name == null || skipUploadExt == null || skipUploadExt.isBlank() || name.lastIndexOf('.') < 0) {
++            return false;
++        }
++        String ext = name.substring(name.lastIndexOf('.') + 1).toLowerCase(Locale.ROOT);
++        return Arrays.stream(skipUploadExt.split(",")).map(e -> e.trim().replaceFirst("^\\.", "").toLowerCase(Locale.ROOT))
++                .anyMatch(ext::equals);
++    }
++
+     /**
+      * Check if the file has been uploaded by the fingerprint.
+      * @param workspaceId
+@@ -34,6 +53,11 @@ public class MediaController implements IHttpMediaService {
+      */
+     @Override
+     public HttpResultResponse mediaFastUpload(String workspaceId, @Valid MediaFastUploadRequest request, HttpServletRequest req, HttpServletResponse rsp) {
++        if (skipUpload(request.getName())) {
++            log.info("pilot media fast-upload: name={} fingerprint={} -> skipped (PILOT_SKIP_UPLOAD_EXT={})",
++                    request.getName(), request.getFingerprint(), skipUploadExt);
++            return HttpResultResponse.success();
++        }
+         boolean isExist = mediaService.fastUpload(workspaceId, request.getFingerprint());
+         // onprem: trace of the Pilot 2 upload steps (why files are skipped or never arrive)
+         log.info("pilot media fast-upload: name={} path={} fingerprint={} ext={} -> {}", request.getName(),
+-- 
+2.47.3
+
