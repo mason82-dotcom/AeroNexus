@@ -1,0 +1,124 @@
+From a5091533ba7743611606b196a494af3e2404b319 Mon Sep 17 00:00:00 2001
+From: aeronexus <aeronexus@local>
+Date: Thu, 15 Oct 2026 09:10:15 +0200
+Subject: [PATCH] onprem: pilot media upload manual by default, choice kept
+ across logins
+
+The media module was loaded with auto upload (photo + video) forced on at
+every login and preview photos as type, overriding the pilot's choice on
+the media settings page. Load the stored choice instead (localStorage of
+the Pilot 2 web view), default manual upload and original photos.
+---
+ src/api/pilot-bridge.ts              | 42 ++++++++++++++++++++++++----
+ src/pages/page-pilot/pilot-media.vue | 10 +++----
+ 2 files changed, 42 insertions(+), 10 deletions(-)
+
+diff --git a/src/api/pilot-bridge.ts b/src/api/pilot-bridge.ts
+index 61bdf4e..fef26bb 100644
+--- a/src/api/pilot-bridge.ts
++++ b/src/api/pilot-bridge.ts
+@@ -47,6 +47,35 @@ export interface MediaParam {
+   autoUploadVideo: boolean // 是否自动上传视频， 非必需
+ }
+ 
++const MEDIA_PREFS_KEY = 'aeronexus.mediaUpload'
++
++function loadMediaPrefs (): MediaParam {
++  const prefs: MediaParam = {
++    autoUploadPhoto: false,
++    autoUploadPhotoType: EPhotoType.Original,
++    autoUploadVideo: false
++  }
++  try {
++    const stored = JSON.parse(localStorage.getItem(MEDIA_PREFS_KEY) || '{}')
++    if (typeof stored.autoUploadPhoto === 'boolean') prefs.autoUploadPhoto = stored.autoUploadPhoto
++    if (typeof stored.autoUploadVideo === 'boolean') prefs.autoUploadVideo = stored.autoUploadVideo
++    if (stored.autoUploadPhotoType === EPhotoType.Original || stored.autoUploadPhotoType === EPhotoType.Preview) {
++      prefs.autoUploadPhotoType = stored.autoUploadPhotoType
++    }
++  } catch (e) {
++    // no or broken stored prefs: keep the manual defaults
++  }
++  return prefs
++}
++
++function saveMediaPrefs (prefs: Partial<MediaParam>) {
++  try {
++    localStorage.setItem(MEDIA_PREFS_KEY, JSON.stringify({ ...loadMediaPrefs(), ...prefs }))
++  } catch (e) {
++    // storage unavailable: the setting still applies until the next login
++  }
++}
++
+ function returnBool (response: string): boolean {
+   const res: JsResponse = JSON.parse(response)
+   const isError = errorHint(res)
+@@ -106,17 +135,20 @@ export default {
+     }
+     components.set(EComponentName.Api, apiParam)
+     components.set(EComponentName.Tsa, {})
+-    const mediaParam: MediaParam = {
+-      autoUploadPhoto: true,
+-      autoUploadPhotoType: EPhotoType.Preview,
+-      autoUploadVideo: true
+-    }
++    // AeroNexus: the media module is loaded at every login, so it must carry the
++    // pilot's own choice (pilot-media page) instead of forcing auto upload on.
++    // Default: manual upload (select files in the Pilot 2 album), original photos.
++    const mediaParam: MediaParam = loadMediaPrefs()
+     components.set(EComponentName.Media, mediaParam)
+     components.set(EComponentName.Mission, {})
+ 
+     return components
+   },
+ 
++  saveMediaPrefs (prefs: Partial<MediaParam>) {
++    saveMediaPrefs(prefs)
++  },
++
+   getComponentParam (key:EComponentName): any {
+     return components.get(key)
+   },
+diff --git a/src/pages/page-pilot/pilot-media.vue b/src/pages/page-pilot/pilot-media.vue
+index 50222b3..7864d71 100644
+--- a/src/pages/page-pilot/pilot-media.vue
++++ b/src/pages/page-pilot/pilot-media.vue
+@@ -69,7 +69,7 @@
+ 
+ <script lang="ts" setup>
+ import { message } from 'ant-design-vue'
+-import { onMounted, ref } from 'vue'
++import { ref } from 'vue'
+ import apiPilot from '/@/api/pilot-bridge'
+ import { getRoot } from '/@/root'
+ import { EComponentName, EPhotoType, EDownloadOwner } from '/@/types'
+@@ -81,22 +81,22 @@ const enableVideoUpload = ref<boolean>(apiPilot.getAutoUploadVideo())
+ const photoType = ref<number>(apiPilot.getUploadPhotoType())
+ const uploadPath = ref<number>(apiPilot.getDownloadOwner())
+ 
++// AeroNexus: each choice is also stored, so the next login loads it again.
+ const onPhotoUpload = () => {
+   apiPilot.setAutoUploadPhoto(enablePhotoUpload.value)
++  apiPilot.saveMediaPrefs({ autoUploadPhoto: enablePhotoUpload.value })
+ }
+ const onVideoUpload = () => {
+   apiPilot.setAutoUploadVideo(enableVideoUpload.value)
++  apiPilot.saveMediaPrefs({ autoUploadVideo: enableVideoUpload.value })
+ }
+ const onPhototype = () => {
+   apiPilot.setUploadPhotoType(photoType.value)
++  apiPilot.saveMediaPrefs({ autoUploadPhotoType: photoType.value })
+ }
+ const onUploadPath = (e: any) => {
+   apiPilot.setDownloadOwner(uploadPath.value)
+ }
+-onMounted(() => {
+-  console.error(apiPilot.getUploadPhotoType())
+-  console.error(apiPilot.getAutoUploadVideo())
+-})
+ </script>
+ 
+ <style lang="scss" scoped>
+-- 
+2.47.3
+

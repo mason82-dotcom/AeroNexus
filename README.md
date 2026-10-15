@@ -14,7 +14,7 @@ DJI Pilot 2 auf der Fernsteuerung verbindet sich direkt mit dem eigenen Server, 
 | AeroNexus Pilot | `pilot/` | verfügbar | Anbindung DJI Pilot 2 (Login-Seite, JSBridge). MSDK-App geplant |
 | AeroNexus Fleet | `fleet/` | verfügbar | Gerätemodelle, Topologie, Gerätewörterbuch |
 | AeroNexus Telemetry | `telemetry/` | verfügbar | MQTT-Broker (EMQX), Livestream-Server (MediaMTX) |
-| AeroNexus Evidence | `evidence/` | Basis | Medienablage (S3/MinIO). Beweissicherung geplant |
+| AeroNexus Evidence | `evidence/` | verfügbar | Medienablage (S3/MinIO), Beweissicherung: SHA-256 je Datei in einer Hash-Kette, Prüfung und Prüfbericht (API im Mapping-Dienst) |
 | AeroNexus Mission | `mission/` | Basis | Einsatzplanung (Menü Aufgabenpläne, Dienst: mapping-tool/service), Flugplanung im Browser |
 | AeroNexus Mapping Tool | `mapping-tool/` | Basis | Leaflet-Karte (offline: Baden-Württemberg als Vektorkarte), Annotationen, Flugzonen, Kartierungsaufträge |
 | AeroNexus RTK | `rtk/` | geplant | Eigene RTK-Basis / NTRIP-Caster |
@@ -71,6 +71,7 @@ Bisherige Patches:
 - **control 0025:** Offline-Luftbild (Orthofotos LGL BW DOP20, Open Data) als Kartenebene
 - **control 0026:** Schalter Geländefolge (DJI-Echtzeit) für geplante und kopierte Flächenrouten
 - **control 0027:** Aufgabenpläne als Einsatzplanung (Zweck, Routen, Drohne, Pilot, Checkliste, Status); „Meine Einsätze heute“ auf der Fernsteuerung
+- **control 0028:** Pilot 2 lädt Medien standardmäßig manuell hoch (Auto-Upload aus, Originalfotos); die Wahl auf der Medien-Seite bleibt über Anmeldungen hinweg erhalten
 
 Prüfen, ob die Patches vollständig sind und sauber auf die gepinnten Commits passen: `edge/verify-patches.sh`
 
