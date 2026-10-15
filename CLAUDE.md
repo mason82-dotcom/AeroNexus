@@ -148,6 +148,12 @@ Editing routes (mapping-tool/service/app/wpml.py, verified with Pilot 2 on RC Pr
   drones). The mapping ingest uses XMP drone-dji:DroneSerialNumber (media_meta drone_serial, extractor v3) and
   falls back to Pilot's value; cloud_sample.media_file.drone stays as reported. Older rows are re-read in the
   background after an extractor VERSION bump and moved to the right flight set (empty sets removed).
+- SD card import: mount read-only (`sudo mount -o ro,uid=$(id -u),gid=$(id -g) /dev/sdX1 /mnt/sd`), then
+  `edge/sd-import.sh` (inventory) / `--import` (app/sdimport.py in a throwaway mapping container). Media like a
+  Pilot 2 upload (wayline/sdimport-<volume>/<sha256>/<name> + upload callback); PPK raw data (every non-media file
+  below DCIM: .MRK .OBS .NAV .RTK .PBK) ALWAYS comes along under ppk/sdimport-<volume>/ (no media_file row).
+  PILOT_SKIP_UPLOAD_EXT types are skipped unless `--include-ext`. Matrice 4 cards have no SRT: video telemetry
+  comes from the embedded subtitle track, the model from the MP4 (moov may be at the end). Log: edge/logs/sd-import/.
 - Object keys of Pilot 2 uploads are not reliable DJI names: some land as `wayline/org_<hash>_<ms>.<ext>`
   (seen 2026-10-15), the DJI name is only in cloud_sample.media_file.file_name. Services without DB access find
   files by content: pv pre-measurement by R-JPEG APP3 data, farming M3M bands by XMP ImageSource + CaptureUUID
