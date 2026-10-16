@@ -1,0 +1,797 @@
+From e17cedfdde49941e3dee13c5fe000680e02c1ff8 Mon Sep 17 00:00:00 2001
+From: RomaN <mason@rpi5.local>
+Date: Fri, 16 Oct 2026 14:35:48 +0200
+Subject: [PATCH] onprem: missions linked to flight sets (suggestions,
+ evaluation, jobs), route/drone check, filters, repeat; flight set deep link
+
+---
+ src/api/missions.ts                         |  27 +-
+ src/locales/de.ts                           |  25 ++
+ src/pages/page-web/projects/flight-sets.vue |  18 +-
+ src/pages/page-web/projects/missions.vue    | 364 +++++++++++++++++---
+ 4 files changed, 373 insertions(+), 61 deletions(-)
+
+diff --git a/src/api/missions.ts b/src/api/missions.ts
+index 4f3ca5b..b8d44c5 100644
+--- a/src/api/missions.ts
++++ b/src/api/missions.ts
+@@ -8,6 +8,20 @@ export type MissionStatus = 'planned' | 'ready' | 'flown' | 'evaluated' | 'cance
+ 
+ export interface CheckItem { key: string, label: string, done: boolean, by: string | null, at: string | null }
+ 
++// onprem: flight set of the mapping ingest linked to (or suggested for) a mission; camera times are local
++export interface MissionFlightSet {
++  id: string
++  drone: string
++  kind: string
++  shots: number
++  files: number
++  first_capture: string
++  last_capture: string
++  gap_min?: number // suggestions: minutes between the planned window and the flight (0 = overlapping)
++}
++
++export interface MissionJob { id: string, name: string, status: string, progress: number, flight_set: string }
++
+ export interface Mission {
+   id: string
+   title: string
+@@ -20,6 +34,10 @@ export interface Mission {
+   drone_sn: string | null
+   pilot: string | null
+   wayline_ids: string[]
++  flight_set_ids: string[]
++  flight_sets: MissionFlightSet[]
++  suggested_sets: MissionFlightSet[]
++  jobs: MissionJob[]
+   checklist: CheckItem[]
+   status: MissionStatus
+   created_by: string
+@@ -40,9 +58,10 @@ export interface MissionInput {
+ 
+ export interface MissionOptions {
+   purposes: Record<MissionPurpose, string>
+-  drones: { sn: string, name: string }[]
++  drones: { sn: string, name: string, model_key: string }[]
+   pilots: string[]
+-  routes: { id: string, name: string }[]
++  routes: { id: string, name: string, model_key: string, template_types: string }[]
++  models: Record<string, string> // drone model key -> name
+ }
+ 
+ const http = axios.create({ timeout: 15000 })
+@@ -76,6 +95,10 @@ export async function setMissionStatus (id: string, status: MissionStatus): Prom
+   return (await http.put(`/api/mapping/missions/${id}/status`, { status })).data
+ }
+ 
++export async function setMissionFlightSets (id: string, flightSetIds: string[]): Promise<Mission> {
++  return (await http.put(`/api/mapping/missions/${id}/flight-sets`, { flight_set_ids: flightSetIds })).data
++}
++
+ export async function deleteMission (id: string): Promise<void> {
+   await http.delete(`/api/mapping/missions/${id}`)
+ }
+diff --git a/src/locales/de.ts b/src/locales/de.ts
+index 5976549..fd4cb3a 100644
+--- a/src/locales/de.ts
++++ b/src/locales/de.ts
+@@ -143,6 +143,8 @@ export default {
+   "equal interval": "gleiche Intervalle",
+   "Error Code": "Fehlercode",
+   "Error code: {0}": "Fehlercode: {0}",
++  "Evaluate": "Auswerten",
++  "Evaluation": "Auswertung",
+   "Exit": "Beenden",
+   "Exit flight control": "Flugsteuerung abgeben",
+   "Export:": "Export:",
+@@ -168,6 +170,8 @@ export default {
+   "Flight": "Flug",
+   "Flight Area": "Flugzonen",
+   "Flight control is changed to {0}": "Flugsteuerung liegt jetzt bei {0}",
++  "Flight found": "Flug gefunden",
++  "Flight linked, mission marked as flown": "Flug verknüpft, Einsatz als geflogen markiert",
+   "Flight Mode": "Flugmodus",
+   "Flight Route": "Flugroute",
+   "Flight Route Library": "Flugrouten",
+@@ -236,10 +240,13 @@ export default {
+   "Layer \"{0}\" deleted": "Layer \"{0}\" gelöscht",
+   "Lens:": "Objektiv:",
+   "Level": "Stufe",
++  "Link another flight set ...": "Anderen Flugsatz verknüpfen …",
++  "Link flight": "Verknüpfen",
+   "Live streaming source selection": "Livestream-Quelle",
+   "Livestream": "Livestream",
+   "Livestream Manually": "Livestream manuell",
+   "Living": "Live",
++  "Load older missions (currently {0} days)": "Ältere Einsätze laden (aktuell {0} Tage)",
+   "loading": "wird geladen",
+   "locked:": "gesperrt:",
+   "Log Out": "Abmelden",
+@@ -260,6 +267,7 @@ export default {
+   "Margin (m)": "Rand (m)",
+   "mean": "Mittel",
+   "Mean": "Mittel",
++  "Media": "Medien",
+   "Media File Remain Upload": "Noch hochzuladende Mediendateien",
+   "Media File Upload": "Medien-Upload",
+   "Media Files": "Mediendateien",
+@@ -288,11 +296,14 @@ export default {
+   "Name": "Name",
+   "Name of the copy": "Name der Kopie",
+   "Name:": "Name:",
++  "NDVI / mapping": "NDVI / Kartierung",
+   "NDVI preview (Mavic 3M)": "NDVI-Vorschau (Mavic 3M)",
+   "NDVI preview not available (farming service not reachable)": "NDVI-Vorschau nicht verfügbar (Farming-Dienst nicht erreichbar)",
+   "Network State": "Netzwerkstatus",
++  "New": "Neu",
+   "New job": "Neuer Auftrag",
+   "New mapping job": "Neuer Kartierungsauftrag",
++  "New mission with the same purpose, site, drone, pilot and routes": "Neuer Einsatz mit gleichem Zweck, Ort, Drohne, Pilot und Routen",
+   "New PV inspection": "Neue PV-Inspektion",
+   "No": "Nein",
+   "no daylight": "ohne Tageslicht",
+@@ -300,6 +311,7 @@ export default {
+   "No drone serial (video)": "Keine Seriennummer (Video)",
+   "No flight sets yet": "Noch keine Flugsätze",
+   "No jobs. Processing runs on the x64 compute node.": "Keine Aufträge. Gerechnet wird auf dem x64-Rechenknoten.",
++  "No matching flight yet: photos appear here after the upload from Pilot 2 or the SD import (same day and drone).": "Noch kein passender Flug: Fotos erscheinen hier nach dem Upload aus Pilot 2 oder dem SD-Import (gleicher Tag und gleiche Drohne).",
+   "No media files": "Keine Mediendateien",
+   "No reflectance panel: compare values within this flight only": "Ohne Kalibrierpanel: Werte nur innerhalb dieses Fluges vergleichen",
+   "No results yet.": "Noch keine Ergebnisse.",
+@@ -311,7 +323,9 @@ export default {
+   "OK": "OK",
+   "Online": "Online",
+   "Opacity": "Deckkraft",
++  "Open": "Offen",
+   "Open 3rd Party APP": "Drittanbieter-App öffnen",
++  "Opens the flight set page with mapping job, PV inspection and NDVI": "Öffnet die Flugsatz-Seite mit Kartierungsauftrag, PV-Inspektion und NDVI",
+   "Original": "Original",
+   "Original Photo": "Originalfoto",
+   "Orthomosaic": "Orthomosaik",
+@@ -323,6 +337,7 @@ export default {
+   "Panorama": "Panorama",
+   "Param:": "Parameter:",
+   "Password": "Passwort",
++  "Past": "Vergangen",
+   "Path for uploading media resources in dual-controller mode": "Upload-Pfad für Medien im Dual-Controller-Betrieb",
+   "Paused": "Pausiert",
+   "Payload Control": "Nutzlaststeuerung",
+@@ -368,6 +383,8 @@ export default {
+   "Release Date": "Veröffentlicht",
+   "Release Note": "Versionshinweise",
+   "Remote Control Sn": "Fernsteuerung-SN",
++  "Remove link": "Verknüpfung entfernen",
++  "Repeat": "Wiederholen",
+   "Reset filters": "Filter zurücksetzen",
+   "reset mode:": "Rücksetzmodus:",
+   "Result layers": "Ergebnis-Layer",
+@@ -382,7 +399,9 @@ export default {
+   "RGB": "RGB",
+   "rgb": "RGB",
+   "RGB only": "Nur RGB",
++  "Route \"{0}\" is planned for {1}, the mission drone is a {2}: Pilot 2 does not offer it for this drone.": "Route „{0}“ ist für {1} geplant, die Einsatzdrohne ist eine {2}: Pilot 2 bietet sie für diese Drohne nicht an.",
+   "Route cannot be shown: mapping service not reachable or file unreadable": "Route kann nicht angezeigt werden: Mapping-Dienst nicht erreichbar oder Datei unlesbar",
++  "Route/drone": "Route/Drohne",
+   "RTH Altitude Relative to Dock (m)": "Rückkehrhöhe über Dock (m)",
+   "RTK": "RTK",
+   "RTK Fixed": "RTK fixiert",
+@@ -399,6 +418,7 @@ export default {
+   "Saving failed: ": "Speichern fehlgeschlagen: ",
+   "Saving rates failed: ": "Speichern der Mengen fehlgeschlagen: ",
+   "Search file name": "Dateiname suchen",
++  "Search title, site, pilot": "Titel, Ort, Pilot suchen",
+   "Select Camera": "Kamera wählen",
+   "Select Clarity": "Qualität wählen",
+   "Select Device": "Gerät wählen",
+@@ -474,6 +494,7 @@ export default {
+   "Timed": "Geplant",
+   "To be performed": "Ausstehend",
+   "To be synced": "Noch nicht synchronisiert",
++  "To evaluate": "Auszuwerten",
+   "Token": "Token",
+   "Token:": "Token:",
+   "Total": "Gesamt",
+@@ -510,6 +531,7 @@ export default {
+   "WEBRTC": "WebRTC",
+   "When enabled, photos and videos will be automatically uploaded to this server": "Wenn aktiviert, werden Fotos und Videos automatisch auf diesen Server hochgeladen",
+   "Wind Speed": "Windgeschwindigkeit",
++  "within the planned time": "im geplanten Zeitraum",
+   "without drone": "ohne Drohne",
+   "Without PPK positions (for PPK use edge/ppk.sh on the server).": "Ohne PPK-Positionen (für PPK edge/ppk.sh auf dem Server verwenden).",
+   "Working Current": "Betriebsstrom",
+@@ -528,7 +550,10 @@ export default {
+   "{0} % valid": "{0} % gültig",
+   "{0} corners": "{0} Ecken",
+   "{0} expired lease(s)": "{0} abgelaufene Lease(s)",
++  "{0} h apart": "{0} h vom Plan entfernt",
+   "{0} images": "{0} Bilder",
++  "{0} jobs": "{0} Aufträge",
++  "{0} min apart": "{0} min vom Plan entfernt",
+   "{0} photos of this flight set; the job waits until a compute node picks it up.": "{0} Fotos dieses Flugsatzes; der Auftrag wartet, bis ein Rechenknoten ihn abholt.",
+   "{0} PPK camera positions are used instead of the EXIF positions": "{0} PPK-Kamerapositionen ersetzen die EXIF-Positionen",
+   "{0} routes are shown only. Area routes (mapping2d) can be edited here; edit this route in Pilot 2.": "{0}-Routen werden nur angezeigt. Hier lassen sich Flächenrouten (mapping2d) bearbeiten; diese Route bitte in Pilot 2 bearbeiten.",
+diff --git a/src/pages/page-web/projects/flight-sets.vue b/src/pages/page-web/projects/flight-sets.vue
+index 05a2c09..9f94a66 100644
+--- a/src/pages/page-web/projects/flight-sets.vue
++++ b/src/pages/page-web/projects/flight-sets.vue
+@@ -65,8 +65,8 @@
+ <script lang="ts" setup>
+ // onprem: flight sets (ingest of the mapping service): overview, positions on the map, one-click actions
+ import L from 'leaflet'
+-import { computed, onMounted, onUnmounted, reactive, ref } from 'vue'
+-import { useRouter } from 'vue-router'
++import { computed, nextTick, onMounted, onUnmounted, reactive, ref } from 'vue'
++import { useRoute, useRouter } from 'vue-router'
+ import { message } from 'ant-design-vue'
+ import { ReloadOutlined } from '@ant-design/icons-vue'
+ import { t } from '/@/locales'
+@@ -79,6 +79,7 @@ import {
+ import { createInspection } from '/@/api/pv'
+ 
+ const router = useRouter()
++const route = useRoute()
+ const sets = ref<FlightSetSummary[]>([])
+ const loading = ref(false)
+ const view = ref<'flights' | 'tests' | 'all'>('flights')
+@@ -216,7 +217,18 @@ async function createPv () {
+   }
+ }
+ 
+-onMounted(refresh)
++// deep link from a mission: /flight-sets?set=<id prefix> selects and shows that set
++onMounted(async () => {
++  await refresh()
++  const q = route.query.set
++  const s = typeof q === 'string' && q ? sets.value.find(x => x.id.startsWith(q)) : undefined
++  if (!s) return
++  if (!shown.value.includes(s)) view.value = 'all'
++  const drawn = select(s)
++  await nextTick()
++  document.querySelector('.flight-sets .card.selected')?.scrollIntoView({ block: 'center' })
++  await drawn
++})
+ </script>
+ 
+ <style lang="scss" scoped>
+diff --git a/src/pages/page-web/projects/missions.vue b/src/pages/page-web/projects/missions.vue
+index 2a402e8..13e655c 100644
+--- a/src/pages/page-web/projects/missions.vue
++++ b/src/pages/page-web/projects/missions.vue
+@@ -3,55 +3,121 @@
+     <Title :title="$t('Task Plan Library')" />
+     <div class="missions-content uranus-scrollbar">
+       <div class="head">
+-        <span class="hint">{{ $t('Missions for remote controller flights: plan, check, fly, evaluate.') }}</span>
+-        <span>
+-          <a class="reload" @click="refresh"><ReloadOutlined /></a>
+-          <a-button size="small" type="primary" @click="openForm()">{{ $t('New mission') }}</a-button>
+-        </span>
++        <a-input-search v-model:value="query" size="small" allow-clear :placeholder="$t('Search title, site, pilot')" />
++        <a-tooltip :title="$t('Refresh')"><a class="reload" @click="refresh"><ReloadOutlined :spin="loading" /></a></a-tooltip>
++        <a-button size="small" type="primary" @click="openForm()"><PlusOutlined />{{ $t('New') }}</a-button>
+       </div>
++      <a-radio-group v-model:value="view" size="small" button-style="solid" class="views">
++        <a-radio-button value="open">{{ $t('Open') }} {{ counts.open }}</a-radio-button>
++        <a-radio-button value="todo">{{ $t('To evaluate') }} {{ counts.todo }}</a-radio-button>
++        <a-radio-button value="all">{{ $t('All') }} {{ missions.length }}</a-radio-button>
++      </a-radio-group>
+ 
+       <div v-for="group in groups" :key="group.key" class="section">
+         <div class="section-head">{{ $t(group.label) }} <span class="count">{{ group.items.length }}</span></div>
+         <div v-if="!group.items.length" class="hint">{{ $t('None') }}</div>
+-        <div v-for="m in group.items" :key="m.id" class="item" :class="{ open: openId === m.id }">
++        <div v-for="m in group.items" :key="m.id" class="item" :class="{ open: openId === m.id, done: m.status === 'evaluated' || m.status === 'cancelled' }">
+           <div class="row" @click="toggle(m)">
+-            <span class="time">{{ fmtTime(m.planned_start, group.key !== 'today') }}</span>
++            <span class="time">{{ fmtStart(m.planned_start, group.key !== 'today') }}</span>
+             <span class="name" :title="m.title">{{ m.title }}</span>
+             <a-tag :color="STATUS_COLORS[m.status]" class="tag">{{ $t(statusText[m.status]) }}</a-tag>
+           </div>
+-          <div class="meta">
+-            {{ m.purpose_label }}<span v-if="m.site"> &#183; {{ m.site }}</span>
++          <div class="meta" @click="toggle(m)">
++            <span class="purpose" :class="m.purpose">{{ m.purpose_label }}</span>
++            <span v-if="m.site"> &#183; {{ m.site }}</span>
+             <span v-if="m.drone_sn"> &#183; {{ droneName(m.drone_sn) }}</span>
+             <span v-if="m.pilot"> &#183; {{ m.pilot }}</span>
+-            &#183; {{ $t('Checklist {0}/{1}', m.checklist.filter(c => c.done).length, m.checklist.length) }}
++            <span v-if="m.duration_min"> &#183; {{ m.duration_min }} min</span>
++          </div>
++          <div class="badges" @click="toggle(m)">
++            <a-progress v-if="m.status === 'planned' || m.status === 'ready'" class="progress" size="small"
++                        :percent="checkPercent(m)" :show-info="false" :stroke-color="m.status === 'ready' ? '#52c41a' : '#2d8cf0'" />
++            <span v-if="m.status === 'planned' || m.status === 'ready'" class="dim">{{ $t('Checklist {0}/{1}', doneCount(m), m.checklist.length) }}</span>
++            <span v-if="m.wayline_ids.length" class="dim"><NodeIndexOutlined /> {{ m.wayline_ids.length }}</span>
++            <a-tooltip v-if="routeWarnings(m).length" :title="routeWarnings(m).join(' ')">
++              <span class="warn"><WarningOutlined /> {{ $t('Route/drone') }}</span>
++            </a-tooltip>
++            <span v-if="m.flight_sets.length" class="ok"><CameraOutlined /> {{ m.flight_sets.reduce((n, s) => n + s.shots, 0) }} {{ $t('shots') }}</span>
++            <span v-else-if="m.suggested_sets.length" class="suggest"><BulbOutlined /> {{ $t('Flight found') }}</span>
++            <span v-if="m.jobs.length" class="dim"><a-badge :status="jobBadge(m)" />{{ $t('{0} jobs', [m.jobs.length]) }}</span>
+           </div>
+ 
+           <div v-if="openId === m.id" class="detail">
+             <div v-if="m.notes" class="notes">{{ m.notes }}</div>
++
+             <div class="label">{{ $t('Routes') }}</div>
+             <div v-if="!m.wayline_ids.length" class="hint">{{ $t('No route assigned') }}</div>
+-            <div v-for="id in m.wayline_ids" :key="id" class="route">
++            <div v-for="id in m.wayline_ids" :key="id" class="route" :class="{ shown: shownRoute === id }">
+               <a @click="showRoute(id)"><AimOutlined /> {{ routeName(id) }}</a>
++              <span class="dim">{{ routeInfo(id) }}</span>
++            </div>
++            <a-alert v-for="w in routeWarnings(m)" :key="w" type="warning" show-icon class="alert" :message="w" />
++
++            <div class="label">{{ $t('Flight sets') }}</div>
++            <div v-for="s in m.flight_sets" :key="s.id" class="set">
++              <div class="set-row">
++                <a @click="showPositions(s)"><EnvironmentOutlined /> {{ fmtLocal(s.first_capture) }}–{{ s.last_capture.slice(11, 16) }}</a>
++                <span class="dim">{{ droneName(s.drone) }} &#183; {{ s.shots }} {{ $t('shots') }} &#183; {{ $t(kindLabel[s.kind] || s.kind) }}</span>
++                <a-tooltip :title="$t('Remove link')"><a class="unlink" @click="unlinkSet(m, s.id)"><CloseOutlined /></a></a-tooltip>
++              </div>
++              <div class="set-actions">
++                <a-tooltip :title="$t('Opens the flight set page with mapping job, PV inspection and NDVI')">
++                  <a-button size="small" type="primary" ghost @click="evaluate(s)">{{ $t(evaluateText[m.purpose]) }}</a-button>
++                </a-tooltip>
++                <a-button size="small" @click="openMedia(s)">{{ $t('Media') }}</a-button>
++              </div>
+             </div>
+-            <div class="label">{{ $t('Checklist') }}</div>
++            <template v-if="!m.flight_sets.length">
++              <div v-for="s in m.suggested_sets" :key="s.id" class="set suggestion">
++                <div class="set-row">
++                  <a @click="showPositions(s)"><BulbOutlined /> {{ fmtLocal(s.first_capture) }}–{{ s.last_capture.slice(11, 16) }}</a>
++                  <span class="dim">{{ droneName(s.drone) }} &#183; {{ s.shots }} {{ $t('shots') }}</span>
++                </div>
++                <div class="set-actions">
++                  <span class="dim">{{ s.gap_min ? gapText(s.gap_min) : $t('within the planned time') }}</span>
++                  <a-button size="small" type="primary" @click="linkSet(m, s.id)">{{ $t('Link flight') }}</a-button>
++                </div>
++              </div>
++              <div v-if="!m.suggested_sets.length" class="hint">{{ $t('No matching flight yet: photos appear here after the upload from Pilot 2 or the SD import (same day and drone).') }}</div>
++            </template>
++            <a-select v-if="m.status !== 'cancelled'" class="pick" size="small" show-search :value="undefined" :options="setOptions(m)"
++                      :filter-option="filterOption" :placeholder="$t('Link another flight set ...')"
++                      :dropdown-match-select-width="false" @focus="loadSets" @select="(id) => linkSet(m, id)" />
++
++            <template v-if="m.jobs.length">
++              <div class="label">{{ $t('Evaluation') }}</div>
++              <div v-for="j in m.jobs" :key="j.id" class="job">
++                <a @click="openJobs">{{ j.name }}</a>
++                <a-tag :color="jobColor[j.status]" class="tag">{{ $t(jobStatusText[j.status] || j.status) }}{{ j.status === 'RUNNING' ? ' ' + Math.round(j.progress) + ' %' : '' }}</a-tag>
++              </div>
++            </template>
++
++            <div class="label">{{ $t('Checklist') }} <span class="dim">{{ doneCount(m) }}/{{ m.checklist.length }}</span></div>
+             <div v-for="c in m.checklist" :key="c.key" class="check">
+               <a-checkbox :checked="c.done" :disabled="m.status === 'evaluated' || m.status === 'cancelled'"
+                           @change="(e) => check(m, c.key, e.target.checked)">{{ c.label }}</a-checkbox>
+-              <span v-if="c.done && c.by" class="by">{{ c.by }}, {{ fmtTime(c.at, true) }}</span>
++              <span v-if="c.done && c.by" class="by">{{ c.by }}, {{ fmtStart(c.at, true) }}</span>
+             </div>
+             <div class="actions">
+-              <a-button v-for="s in nextStatus[m.status]" :key="s" size="small" @click="setStatus(m, s)">
++              <a-button v-for="s in nextStatus[m.status]" :key="s" size="small" :type="s === 'evaluated' ? 'primary' : 'default'"
++                        @click="setStatus(m, s)">
+                 {{ $t(actionText[s]) }}
+               </a-button>
+-              <a-button size="small" @click="openForm(m)">{{ $t('Edit') }}</a-button>
++              <a-button size="small" @click="openForm(m)"><EditOutlined />{{ $t('Edit') }}</a-button>
++              <a-tooltip :title="$t('New mission with the same purpose, site, drone, pilot and routes')">
++                <a-button size="small" @click="openForm(m, true)"><CopyOutlined />{{ $t('Repeat') }}</a-button>
++              </a-tooltip>
+               <a-popconfirm :title="$t('Delete this mission?')" :ok-text="$t('Delete')" :cancel-text="$t('Cancel')"
+                             @confirm="remove(m)">
+-                <a-button size="small" danger>{{ $t('Delete') }}</a-button>
++                <a-button size="small" danger><DeleteOutlined /></a-button>
+               </a-popconfirm>
+             </div>
+             <div class="hint">{{ $t('Remote start is only possible with a DJI Dock: open the route in Pilot 2 on the remote controller and start it there.') }}</div>
+           </div>
+         </div>
++        <a-button v-if="group.key === 'past'" size="small" type="link" class="more" @click="loadOlder">
++          {{ $t('Load older missions (currently {0} days)', [days]) }}
++        </a-button>
+       </div>
+     </div>
+ 
+@@ -68,12 +134,12 @@
+             </a-select>
+           </a-form-item>
+           <a-form-item :label="$t('Site')">
+-            <a-input v-model:value="form.site" :maxlength="120" />
++            <a-auto-complete v-model:value="form.site" :maxlength="120" :options="siteOptions" :filter-option="filterOption" />
+           </a-form-item>
+         </div>
+         <div class="two">
+           <a-form-item :label="$t('Date and time')">
+-            <a-date-picker v-model:value="form.start" show-time format="DD.MM.YYYY HH:mm" :minute-step="5" style="width: 100%" />
++            <a-date-picker v-model:value="form.start" show-time format="dd DD.MM.YYYY HH:mm" :minute-step="5" style="width: 100%" />
+           </a-form-item>
+           <a-form-item :label="$t('Duration (min)')">
+             <a-input-number v-model:value="form.duration_min" :min="1" :max="1440" style="width: 100%" />
+@@ -92,10 +158,10 @@
+           </a-form-item>
+         </div>
+         <a-form-item :label="$t('Routes')">
+-          <a-select v-model:value="form.wayline_ids" mode="multiple" :filter-option="filterRoute" :placeholder="$t('Routes from the library')">
+-            <a-select-option v-for="r in options.routes" :key="r.id" :value="r.id">{{ r.name }}</a-select-option>
+-          </a-select>
++          <a-select v-model:value="form.wayline_ids" mode="multiple" :options="routeOptions" :filter-option="filterOption"
++                    :placeholder="$t('Routes from the library')" />
+         </a-form-item>
++        <a-alert v-for="w in formWarnings" :key="w" type="warning" show-icon class="alert" :message="w" />
+         <a-form-item :label="$t('Notes')">
+           <a-textarea v-model:value="form.notes" :rows="3" :maxlength="4000" />
+         </a-form-item>
+@@ -107,21 +173,35 @@
+ 
+ <script lang="ts" setup>
+ import { t } from '/@/locales'
+-import { computed, onMounted, reactive, ref } from 'vue'
++import L from 'leaflet'
++import { computed, onMounted, onUnmounted, reactive, ref } from 'vue'
++import { useRouter } from 'vue-router'
+ import { message } from 'ant-design-vue'
+-import { AimOutlined, ReloadOutlined } from '@ant-design/icons-vue'
++import {
++  AimOutlined, BulbOutlined, CameraOutlined, CloseOutlined, CopyOutlined, DeleteOutlined, EditOutlined,
++  EnvironmentOutlined, NodeIndexOutlined, PlusOutlined, ReloadOutlined, WarningOutlined,
++} from '@ant-design/icons-vue'
+ import moment, { Moment } from 'moment'
+ import Title from '/@/components/workspace/Title.vue'
+ import {
+-  Mission, MissionOptions, MissionPurpose, MissionStatus, STATUS_COLORS, createMission, deleteMission, listMissions,
+-  missionOptions, setMissionStatus, tickCheck, updateMission,
++  Mission, MissionFlightSet, MissionOptions, MissionPurpose, MissionStatus, STATUS_COLORS, createMission,
++  deleteMission, listMissions, missionOptions, setMissionFlightSets, setMissionStatus, tickCheck, updateMission,
+ } from '/@/api/missions'
+-import { getRouteGeometry } from '/@/api/mapping'
++import { FlightSet, getFlightSetPositions, getFlightSets, getRouteGeometry } from '/@/api/mapping'
+ import { useRouteOverlay } from '/@/hooks/use-route-overlay'
++import { getRoot } from '/@/root'
++import { ERouterName } from '/@/types'
+ 
++const router = useRouter()
+ const missions = ref<Mission[]>([])
+-const options = ref<MissionOptions>({ purposes: {} as any, drones: [], pilots: [], routes: [] })
++const options = ref<MissionOptions>({ purposes: {} as any, drones: [], pilots: [], routes: [], models: {} })
++const allSets = ref<FlightSet[]>([])
++const loading = ref(false)
++const days = ref(30)
++const query = ref('')
++const view = ref<'open' | 'todo' | 'all'>('open')
+ const openId = ref<string | null>(null)
++const shownRoute = ref<string | null>(null)
+ const formVisible = ref(false)
+ const saving = ref(false)
+ const editing = ref<Mission | null>(null)
+@@ -138,52 +218,108 @@ const statusText: Record<MissionStatus, string> = {
+ const actionText: Record<string, string> = {
+   flown: 'Mark as flown', evaluated: 'Mark as evaluated', cancelled: 'Cancel mission', planned: 'Plan again', ready: 'Ready',
+ }
+-// manual transitions offered as buttons (planned <-> ready follows the checklist)
++// manual transitions offered as buttons (planned <-> ready follows the checklist, linking a flight set means flown)
+ const nextStatus: Record<MissionStatus, MissionStatus[]> = {
+   planned: ['flown', 'cancelled'], ready: ['flown', 'cancelled'], flown: ['evaluated'], evaluated: ['flown'], cancelled: ['planned'],
+ }
++const evaluateText: Record<MissionPurpose, string> = {
++  pv: 'PV inspection', farming: 'NDVI / mapping', mapping: 'Mapping job', other: 'Evaluate',
++}
++const kindLabel: Record<string, string> = { thermal: 'Thermal', multispectral: 'Multispectral', rgb: 'RGB', video: 'Video', mixed: 'mixed' }
++const jobStatusText: Record<string, string> = {
++  QUEUED: 'waiting', CLAIMED: 'picked up', RUNNING: 'running', DONE: 'done', FAILED: 'failed', CANCELED: 'canceled'
++}
++const jobColor: Record<string, string> = {
++  QUEUED: 'default', CLAIMED: 'blue', RUNNING: 'processing', DONE: 'success', FAILED: 'error', CANCELED: 'warning',
++}
+ 
++// ---------------------------------------------------------------- list
++function matches (m: Mission): boolean {
++  const q = query.value.trim().toLowerCase()
++  if (q && ![m.title, m.site, m.pilot || '', m.notes, m.purpose_label].some(x => x.toLowerCase().includes(q))) return false
++  if (m.id === openId.value) return true // stays visible while open, e.g. after linking a flight (-> flown)
++  if (view.value === 'open') return m.status === 'planned' || m.status === 'ready'
++  if (view.value === 'todo') return m.status === 'flown'
++  return true
++}
++const counts = computed(() => ({
++  open: missions.value.filter(m => m.status === 'planned' || m.status === 'ready').length,
++  todo: missions.value.filter(m => m.status === 'flown').length,
++}))
+ const groups = computed(() => {
+   const startToday = moment().startOf('day')
+   const endToday = moment().endOf('day')
+-  const items = [...missions.value]
++  const items = missions.value.filter(matches)
+   return [
+     { key: 'today', label: 'Today', items: items.filter(m => moment(m.planned_start).isBetween(startToday, endToday, undefined, '[]')) },
+     { key: 'upcoming', label: 'Upcoming', items: items.filter(m => moment(m.planned_start).isAfter(endToday)) },
+-    {
+-      key: 'past',
+-      label: 'Past (30 days)',
+-      items: items.filter(m => moment(m.planned_start).isBefore(startToday)).reverse(),
+-    },
++    { key: 'past', label: 'Past', items: items.filter(m => moment(m.planned_start).isBefore(startToday)).reverse() },
+   ]
+ })
+ 
+-function fmtTime (iso: string | null, withDate: boolean): string {
++function fmtStart (iso: string | null, withDate: boolean): string {
+   if (!iso) return ''
+-  return moment(iso).format(withDate ? 'DD.MM. HH:mm' : 'HH:mm')
++  return moment(iso).format(withDate ? 'dd DD.MM. HH:mm' : 'HH:mm')
++}
++// camera times of flight sets are local wall clock without zone: show them as they are
++function fmtLocal (local: string): string {
++  return `${local.slice(8, 10)}.${local.slice(5, 7)}. ${local.slice(11, 16)}`
+ }
+-function droneName (sn: string) { return options.value.drones.find(d => d.sn === sn)?.name || sn }
++function gapText (min: number): string {
++  return min < 60 ? t('{0} min apart', [min]) : t('{0} h apart', [(min / 60).toLocaleString('de-DE', { maximumFractionDigits: 1 })])
++}
++function doneCount (m: Mission) { return m.checklist.filter(c => c.done).length }
++function checkPercent (m: Mission) { return m.checklist.length ? Math.round(doneCount(m) / m.checklist.length * 100) : 0 }
++function droneName (sn: string) { return options.value.drones.find(d => d.sn === sn)?.name || (sn ? '…' + sn.slice(-5) : t('unknown drone')) }
+ function routeName (id: string) { return options.value.routes.find(r => r.id === id)?.name || t('deleted route') }
+-function filterRoute (input: string, option: any) {
+-  return String(option.children?.[0]?.children || '').toLowerCase().includes(input.toLowerCase())
++function modelName (key: string) { return options.value.models[key] || key }
++function routeInfo (id: string): string {
++  const r = options.value.routes.find(x => x.id === id)
++  return r ? modelName(r.model_key) : ''
++}
++function jobBadge (m: Mission): 'success' | 'processing' | 'error' | 'default' {
++  if (m.jobs.some(j => j.status === 'FAILED')) return 'error'
++  if (m.jobs.some(j => j.status !== 'DONE' && j.status !== 'CANCELED')) return 'processing'
++  return m.jobs.some(j => j.status === 'DONE') ? 'success' : 'default'
++}
++
++/** Routes planned for another drone model: Pilot 2 offers a route only for its own model. */
++function warningsFor (droneSn: string | null | undefined, waylineIds: string[]): string[] {
++  const drone = options.value.drones.find(d => d.sn === droneSn)
++  if (!drone) return []
++  return waylineIds.map(id => options.value.routes.find(r => r.id === id))
++    .filter(r => r && r.model_key && r.model_key !== drone.model_key)
++    .map(r => t('Route "{0}" is planned for {1}, the mission drone is a {2}: Pilot 2 does not offer it for this drone.',
++      [r!.name, modelName(r!.model_key), modelName(drone.model_key)]))
+ }
++function routeWarnings (m: Mission) { return warningsFor(m.drone_sn, m.wayline_ids) }
++
+ function errorText (e: any): string {
+   const d = e?.response?.data?.detail
+   return Array.isArray(d) ? d.map((x: any) => x.msg).join('; ') : (d || String(e))
+ }
+ 
+ async function refresh () {
++  loading.value = true
+   try {
+     const [opts, list] = await Promise.all([
+       missionOptions(),
+-      listMissions({ start: moment().subtract(30, 'days').startOf('day').toISOString() }),
++      listMissions({ start: moment().subtract(days.value, 'days').startOf('day').toISOString() }),
+     ])
+     options.value = opts
+     missions.value = list
++    if (view.value === 'open' && !counts.value.open) view.value = counts.value.todo ? 'todo' : 'all'
+   } catch (e) {
+     message.error(t('Mapping service not reachable'))
++  } finally {
++    loading.value = false
+   }
+ }
++function loadOlder () {
++  days.value = days.value < 90 ? 90 : days.value < 365 ? 365 : days.value + 365
++  view.value = 'all'
++  refresh()
++}
+ 
+ function replace (m: Mission) {
+   missions.value = missions.value.map(x => (x.id === m.id ? m : x))
+@@ -191,17 +327,94 @@ function replace (m: Mission) {
+ 
+ function toggle (m: Mission) {
+   openId.value = openId.value === m.id ? null : m.id
++  clearPositions()
+   if (openId.value && m.wayline_ids.length) showRoute(m.wayline_ids[0])
++  else if (openId.value && m.flight_sets.length) showPositions(m.flight_sets[0])
+ }
+ 
++// ---------------------------------------------------------------- map
+ async function showRoute (id: string) {
+   try {
+     routeOverlay.show(await getRouteGeometry(id))
++    shownRoute.value = id
+   } catch (e) {
+     message.error(t('Route cannot be shown: mapping service not reachable or file unreadable'))
+   }
+ }
+ 
++let posLayer: L.LayerGroup | null = null
++function clearPositions () {
++  posLayer?.remove()
++  posLayer = null
++}
++async function showPositions (s: MissionFlightSet) {
++  const map = getRoot()?.$map?.leaflet as L.Map | undefined
++  if (!map) return
++  try {
++    const res = await getFlightSetPositions(s.id)
++    clearPositions()
++    const pts = res.points.map(([lat, lon]) => L.latLng(lat, lon))
++    posLayer = L.layerGroup(pts.map(p => L.circleMarker(p, { radius: 3, weight: 0, fillOpacity: 0.9, fillColor: '#f5a623' })))
++      .addTo(map)
++    if (pts.length) map.fitBounds(L.latLngBounds(pts), { padding: [40, 40], maxZoom: 19 })
++  } catch (e) {
++    message.warning(t('Positions not available'))
++  }
++}
++onUnmounted(() => {
++  clearPositions()
++  routeOverlay.clear()
++})
++
++// ---------------------------------------------------------------- flight sets and evaluation
++async function loadSets () {
++  if (allSets.value.length) return
++  try {
++    allSets.value = await getFlightSets()
++  } catch (e) {
++    message.warning(t('Flight sets not available (mapping service not reachable)'))
++  }
++}
++function setOptions (m: Mission) {
++  return [...allSets.value].reverse().filter(s => !m.flight_set_ids.includes(s.id)).map(s => ({
++    value: s.id,
++    label: `${fmtLocal(s.first_capture)} · ${droneName(s.drone)} · ${s.shots} ${t('shots')}`,
++  }))
++}
++function filterOption (input: string, option: { label?: string, value?: string }) {
++  return String(option.label ?? option.value ?? '').toLowerCase().includes(input.toLowerCase())
++}
++async function linkSet (m: Mission, id: string) {
++  try {
++    const updated = await setMissionFlightSets(m.id, [...m.flight_set_ids, id])
++    replace(updated)
++    if (m.status !== updated.status) message.success(t('Flight linked, mission marked as flown'))
++    refresh() // suggestions of other missions no longer offer this flight set
++  } catch (e) {
++    message.error(t('Saving failed: ') + errorText(e))
++  }
++}
++async function unlinkSet (m: Mission, id: string) {
++  try {
++    replace(await setMissionFlightSets(m.id, m.flight_set_ids.filter(x => x !== id)))
++    clearPositions()
++    refresh()
++  } catch (e) {
++    message.error(t('Saving failed: ') + errorText(e))
++  }
++}
++// the flight set page holds the one-click actions (mapping job, PV inspection, NDVI)
++function evaluate (s: MissionFlightSet) {
++  router.push({ path: '/' + ERouterName.FLIGHT_SETS, query: { set: s.id.slice(0, 8) } })
++}
++function openMedia (s: MissionFlightSet) {
++  router.push({ path: '/' + ERouterName.MEDIA, query: { set: s.id.slice(0, 8) } })
++}
++function openJobs () {
++  router.push('/' + ERouterName.MAPPING)
++}
++
++// ---------------------------------------------------------------- checklist and status
+ async function check (m: Mission, key: string, done: boolean) {
+   try {
+     replace(await tickCheck(m.id, key, done))
+@@ -223,20 +436,41 @@ async function remove (m: Mission) {
+     await deleteMission(m.id)
+     missions.value = missions.value.filter(x => x.id !== m.id)
+     routeOverlay.clear()
++    clearPositions()
+   } catch (e) {
+     message.error(t('Deleting failed: ') + errorText(e))
+   }
+ }
+ 
+-function openForm (m?: Mission) {
+-  editing.value = m || null
++// ---------------------------------------------------------------- form
++const routeOptions = computed(() => {
++  const drone = options.value.drones.find(d => d.sn === form.drone_sn)
++  // routes of the selected drone model first
++  return [...options.value.routes]
++    .sort((a, b) => Number(!!drone && b.model_key === drone.model_key) - Number(!!drone && a.model_key === drone.model_key))
++    .map(r => ({ value: r.id, label: `${r.name} (${modelName(r.model_key)})` }))
++})
++const siteOptions = computed(() => [...new Set(missions.value.map(m => m.site).filter(Boolean))].map(s => ({ value: s })))
++const formWarnings = computed(() => warningsFor(form.drone_sn, form.wayline_ids))
++
++function openForm (m?: Mission, repeat = false) {
++  editing.value = m && !repeat ? m : null
++  const nextNoon = moment().add(1, 'day').hour(12).minute(0).second(0).millisecond(0)
+   Object.assign(form, m
+     ? {
+-        title: m.title, purpose: m.purpose, start: moment(m.planned_start), duration_min: m.duration_min, site: m.site,
+-        notes: m.notes, drone_sn: m.drone_sn || undefined, pilot: m.pilot || undefined, wayline_ids: [...m.wayline_ids],
++        title: m.title,
++        purpose: m.purpose,
++        // repeat: same time of day, tomorrow
++        start: repeat ? moment(m.planned_start).year(nextNoon.year()).dayOfYear(nextNoon.dayOfYear()) : moment(m.planned_start),
++        duration_min: m.duration_min,
++        site: m.site,
++        notes: m.notes,
++        drone_sn: m.drone_sn || undefined,
++        pilot: m.pilot || undefined,
++        wayline_ids: m.wayline_ids.filter(id => options.value.routes.some(r => r.id === id)),
+       }
+     : {
+-        title: '', purpose: 'pv', start: moment().add(1, 'day').hour(12).minute(0).second(0), duration_min: 30, site: '',
++        title: '', purpose: 'pv', start: nextNoon, duration_min: 30, site: '',
+         notes: '', drone_sn: undefined, pilot: undefined, wayline_ids: [],
+       })
+   formVisible.value = true
+@@ -246,7 +480,7 @@ async function save () {
+   saving.value = true
+   const body = {
+     title: form.title.trim(), purpose: form.purpose, planned_start: (form.start as Moment).toISOString(),
+-    duration_min: form.duration_min || null, site: form.site.trim(), notes: form.notes, drone_sn: form.drone_sn || null,
++    duration_min: form.duration_min || null, site: (form.site || '').trim(), notes: form.notes, drone_sn: form.drone_sn || null,
+     pilot: form.pilot || null, wayline_ids: form.wayline_ids,
+   }
+   try {
+@@ -267,24 +501,42 @@ onMounted(refresh)
+ </script>
+ 
+ <style lang="scss" scoped>
+-.missions-wrapper { display: flex; flex-direction: column; }
+-.missions-content { flex: 1; overflow-y: auto; padding: 0 12px 12px; color: #fff; }
+-.head { display: flex; justify-content: space-between; align-items: center; gap: 8px; margin: 8px 0; }
+-.reload { margin-right: 10px; }
++.missions-wrapper { display: flex; flex-direction: column; height: 100%; overflow: hidden; }
++.missions-content { flex: 1; min-height: 0; overflow-y: auto; padding: 0 12px 12px; color: #fff; }
++.head { display: flex; align-items: center; gap: 8px; margin: 8px 0; }
++.reload { color: #fff; }
++.views { display: flex; margin-bottom: 4px; :deep(.ant-radio-button-wrapper) { flex: 1; text-align: center; padding: 0 2px; font-size: 12px; white-space: nowrap; } }
+ .section { margin-top: 12px; }
+ .section-head { font-weight: 600; margin-bottom: 4px; .count { color: #888; font-weight: 400; margin-left: 4px; } }
+-.item { padding: 6px; border-bottom: 1px solid #3c3c3c; &.open { background: #2d3442; } }
++.item { padding: 6px; border-bottom: 1px solid #3c3c3c; &.open { background: #2d3442; } &.done:not(.open) { opacity: 0.65; } }
+ .row { display: flex; align-items: center; gap: 8px; cursor: pointer;
+-  .time { color: #8fc3ff; font-variant-numeric: tabular-nums; min-width: 44px; }
+-  .name { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
++  .time { color: #8fc3ff; font-variant-numeric: tabular-nums; white-space: nowrap; }
++  .name { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 500; }
+   .tag { margin-right: 0; } }
+-.meta { color: #aaa; font-size: 12px; margin-top: 2px; }
++.meta { color: #aaa; font-size: 12px; margin-top: 2px; cursor: pointer;
++  .purpose { &.pv { color: #ff9c6e; } &.farming { color: #95de64; } &.mapping { color: #69c0ff; } } }
++.badges { display: flex; align-items: center; flex-wrap: wrap; gap: 4px 10px; font-size: 12px; margin-top: 3px; cursor: pointer;
++  .progress { width: 70px; margin: 0; line-height: 1; }
++  .warn { color: #faad14; }
++  .ok { color: #95de64; }
++  .suggest { color: #ffd666; } }
++.dim { color: #8a8f98; font-size: 12px; }
+ .detail { margin-top: 8px; font-size: 13px;
+-  .label { color: #aaa; font-size: 12px; margin-top: 8px; }
++  .label { color: #aaa; font-size: 12px; margin-top: 10px; margin-bottom: 2px; }
+   .notes { white-space: pre-wrap; color: #ddd; }
+-  .route { margin: 2px 0; }
++  .route { margin: 2px 0; display: flex; gap: 8px; align-items: baseline; &.shown a { font-weight: 600; } }
++  .alert { margin: 4px 0; font-size: 12px; padding: 4px 8px 4px 30px; :deep(.ant-alert-icon) { top: 7px; left: 10px; } }
++  .set { margin: 4px 0; padding: 4px 6px; border-radius: 4px; background: rgba(255, 255, 255, 0.04);
++    &.suggestion { border: 1px dashed #ad8b00; .set-actions { justify-content: space-between; align-items: center; } }
++    .set-row { display: flex; flex-wrap: wrap; gap: 2px 8px; align-items: baseline; flex: 1; }
++    .unlink { margin-left: auto; color: #888; }
++    .set-actions { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 4px; } }
++  .pick { width: 100%; margin-top: 4px; }
++  .job { display: flex; justify-content: space-between; gap: 6px; margin: 2px 0; .tag { margin-right: 0; } }
+   .check { margin: 3px 0; :deep(.ant-checkbox-wrapper) { color: #ddd; font-size: 12px; } .by { color: #888; font-size: 11px; margin-left: 24px; display: block; } }
+   .actions { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px; } }
++.more { padding-left: 0; margin-top: 4px; }
+ .hint { color: #888; font-size: 12px; margin-top: 6px; }
+ .two { display: grid; grid-template-columns: 1fr 1fr; column-gap: 12px; }
++.alert { margin-bottom: 8px; }
+ </style>
+-- 
+2.47.3
+

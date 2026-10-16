@@ -191,6 +191,11 @@ Editing routes (mapping-tool/service/app/wpml.py, verified with Pilot 2 on RC Pr
   Backend in the mapping service (app/missions.py, migration 0004): checklist per purpose, status planned ->
   ready (auto when all ticked) -> flown -> evaluated / cancelled. RC page shows today's missions of the pilot
   (`?mine=true`, local day window). Remote start is Dock-only, so nothing is pushed to Pilot 2 besides the routes.
+- Missions <-> flight sets (migration 0009, web patch 0035): `PUT /missions/{id}/flight-sets` links ingest flight sets
+  (planned/ready -> flown). Suggestions (missions.match_flight_sets, tested): same LOCAL day, within 8 h of the planned
+  window, same drone if set; flight set times are camera local time, planned_start is UTC (container TZ converts).
+  The list carries flight_sets, suggested_sets and the mapping jobs of linked sets (options.flight_set); evaluation
+  buttons open `/flight-sets?set=<id8>`. The form warns when a route's drone_model_key differs from the mission drone.
 
 ## Photovoltaik tool
 - Own stdlib service `photovoltaik-tool/service` (package `pv`, compose `pv`, port 6792) on the pinned GDAL image,

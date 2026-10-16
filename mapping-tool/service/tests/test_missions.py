@@ -2,6 +2,7 @@
 import json
 import unittest
 from datetime import datetime, timezone
+from zoneinfo import ZoneInfo
 
 from pydantic import ValidationError
 
@@ -87,6 +88,45 @@ class ModelTest(unittest.TestCase):
         self.assertEqual(out["wayline_ids"], ["w1"])
         self.assertEqual(out["notes"], "")
         self.assertEqual(datetime.fromisoformat(out["planned_start"].replace("Z", "+00:00")).tzinfo, timezone.utc)
+
+
+
+class MatchTest(unittest.TestCase):
+    TZ = ZoneInfo("Europe/Berlin")
+
+    def fs(self, sid, drone, first, last):
+        return {"id": sid, "drone": drone, "first_capture": first, "last_capture": last}
+
+    def test_local_camera_time_same_day_and_drone(self):
+        # mission 12:00 local (10:00 UTC, CEST), 30 min; camera clocks run local
+        sets = [self.fs("late", "SN", datetime(2026, 10, 4, 17, 25), datetime(2026, 10, 4, 17, 29)),
+                self.fs("exact", "SN", datetime(2026, 10, 4, 12, 5), datetime(2026, 10, 4, 12, 20)),
+                self.fs("other drone", "XX", datetime(2026, 10, 4, 12, 5), datetime(2026, 10, 4, 12, 20)),
+                self.fs("next day", "SN", datetime(2026, 10, 5, 0, 10), datetime(2026, 10, 5, 0, 20)),
+                self.fs("utc trap", "SN", datetime(2026, 10, 4, 10, 0), datetime(2026, 10, 4, 10, 10))]
+        hits = missions.match_flight_sets(datetime(2026, 10, 4, 10, 0), 30, "SN", sets, self.TZ)
+        self.assertEqual([h["id"] for h in hits], ["exact", "utc trap", "late"])
+        self.assertEqual([h["gap_min"] for h in hits], [0, 110, 295])     # 10:10 local ends 110 min before 12:00
+
+    def test_margin_and_without_drone(self):
+        sets = [self.fs("early", "A", datetime(2026, 10, 4, 1, 0), datetime(2026, 10, 4, 1, 30)),
+                self.fs("noon", "B", datetime(2026, 10, 4, 13, 0), datetime(2026, 10, 4, 13, 30))]
+        hits = missions.match_flight_sets(datetime(2026, 10, 4, 10, 0), None, None, sets, self.TZ)
+        self.assertEqual([h["id"] for h in hits], ["noon"])                # 01:30 is 10.5 h before: too far
+
+    def test_output_has_flight_sets(self):
+        row = {"id": "m1", "title": "T", "purpose": "pv", "planned_start": datetime(2026, 10, 4, 9, 30),
+               "duration_min": None, "site": "", "notes": "", "drone_sn": None, "pilot": None,
+               "wayline_ids": "[]", "flight_set_ids": None, "checklist": "[]", "status": "planned",
+               "created_by": "a", "created_at": datetime(2026, 10, 3), "updated_at": datetime(2026, 10, 3),
+               "status_at": None}
+        self.assertEqual(missions._out(row)["flight_set_ids"], [])
+        row["flight_set_ids"] = '["s1"]'
+        self.assertEqual(missions._out(row)["flight_set_ids"], ["s1"])
+
+    def test_flight_sets_input(self):
+        with self.assertRaises(ValidationError):
+            missions.FlightSetsIn(flight_set_ids=[str(i) for i in range(21)])
 
 
 if __name__ == "__main__":
