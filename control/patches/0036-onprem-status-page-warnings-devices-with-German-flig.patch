@@ -1,0 +1,1257 @@
+From c206bf9d62f231823f01cef23d6db523bd260404 Mon Sep 17 00:00:00 2001
+From: RomaN <mason@rpi5.local>
+Date: Fri, 16 Oct 2026 14:55:42 +0200
+Subject: [PATCH] onprem: status page (warnings, devices with German flight
+ modes, today, system state); placeholder args fixed in missions
+
+---
+ src/api/status.ts                        |  59 ++
+ src/locales/de.ts                        |  58 ++
+ src/pages/page-web/projects/missions.vue |   8 +-
+ src/pages/page-web/projects/tsa.vue      | 775 ++++++++++-------------
+ 4 files changed, 469 insertions(+), 431 deletions(-)
+ create mode 100644 src/api/status.ts
+
+diff --git a/src/api/status.ts b/src/api/status.ts
+new file mode 100644
+index 0000000..680a83f
+--- /dev/null
++++ b/src/api/status.ts
+@@ -0,0 +1,59 @@
++// onprem: status page (mapping service app/status.py; host data from edge/status.sh)
++import axios from 'axios'
++import { authToken, mappingBase } from '/@/api/mapping'
++import { ELocalStorageKey } from '/@/types/enums'
++
++export interface ServiceState { name: string, label: string, ok: boolean, detail: string, ms: number }
++export interface DiskState {
++  name: 'system' | 'minio' | 'backup'
++  path: string
++  exists: boolean
++  total?: number
++  free?: number
++  used?: number
++  device?: string
++  mount?: string
++}
++export interface HostState {
++  at: string
++  age_s: number | null
++  hostname: string
++  uptime_s: number
++  load: number[]
++  cpu_count: number
++  temp_c: number | null
++  mem_total: number | null
++  mem_available: number | null
++  disks: DiskState[]
++  backup: { dir: string, last_success: string | null, summary: string[], dumps: number, latest_dump: string | null, cron: boolean }
++  containers: { service: string, state: string, health: string, exit_code: number | null, status: string }[]
++}
++export interface StatusWarning { level: 'error' | 'warning' | 'info', key: string, text: string, link: string | null }
++export interface StatusJob { id: string, name: string, status: string, progress: number, message: string | null, agent_id: string | null, created_at: string }
++export interface SystemStatus {
++  now: string
++  services: ServiceState[]
++  host: HostState | null
++  agents: { agent_id: string, last_seen: string, age_s: number, capabilities: Record<string, unknown> }[]
++  jobs: { counts: Record<string, number>, active: StatusJob[], failed_recent: { id: string, name: string, message: string | null, updated_at: string }[] }
++  today: {
++    missions: { id: string, title: string, purpose: string, planned_start: string, status: string, drone_sn: string | null, pilot: string | null }[]
++    to_evaluate: number
++    uploads_24h: number
++    uploads_by_drone: { drone: string, name: string, files: number }[]
++    last_upload: string | null
++    flight_sets_24h: { id: string, drone: string, drone_name: string, kind: string, shots: number, first_capture: string, uploaded: number }[]
++  }
++  warnings: StatusWarning[]
++}
++
++const http = axios.create({ timeout: 20000 })
++http.interceptors.request.use(config => {
++  config.baseURL = mappingBase()
++  config.headers[ELocalStorageKey.Token] = authToken()
++  return config
++})
++
++export async function getSystemStatus (): Promise<SystemStatus> {
++  return (await http.get('/api/mapping/status')).data
++}
+diff --git a/src/locales/de.ts b/src/locales/de.ts
+index fd4cb3a..79f5983 100644
+--- a/src/locales/de.ts
++++ b/src/locales/de.ts
+@@ -10,7 +10,9 @@ export default {
+   "Action": "Aktion",
+   "Actions": "Aktionen",
+   "Activation time": "Aktivierungszeit",
++  "ActiveTrack": "ActiveTrack",
+   "Adaptive": "Automatisch",
++  "ADS-B avoidance": "ADS-B-Ausweichen",
+   "Agora Live": "Agora-Livestream",
+   "AIM": "Zielen",
+   "Aircraft": "Fluggerät",
+@@ -21,9 +23,11 @@ export default {
+   "All": "Alle",
+   "All drones": "Alle Drohnen",
+   "All flight sets": "Alle Flugsätze",
++  "All systems OK": "Alle Systeme in Ordnung",
+   "ALT": "Höhe",
+   "Altitude above sea level": "Höhe über NN",
+   "Altitude above takeoff level": "Höhe über Startpunkt",
++  "and {0} more": "und {0} weitere",
+   "Annotations": "Annotationen",
+   "Another": "Andere",
+   "APP ID": "App-ID",
+@@ -36,9 +40,11 @@ export default {
+   "Audio Bit Rate:": "Audio-Bitrate:",
+   "Auto Photo Upload": "Fotos automatisch hochladen",
+   "Auto Video Upload": "Videos automatisch hochladen",
++  "Automatic flight": "Automatischer Flug",
+   "Available": "Verfügbar",
+   "Avaliable": "Verfügbar",
+   "Back to home": "Zur Startseite",
++  "Backup disk": "Backup-Platte",
+   "Bands": "Bänder",
+   "Before starting manually, please select the publish mode and livestream type": "Vor dem manuellen Start bitte Veröffentlichungsmodus und Stream-Typ wählen.",
+   "Bind": "Binden",
+@@ -73,9 +79,11 @@ export default {
+   "Commander Flight Height(m):": "Commander-Flughöhe (m):",
+   "Commander Flight Mode:": "Commander-Flugmodus:",
+   "Commander Mode Lost Action:": "Commander-Aktion bei Signalverlust:",
++  "Compute node": "Rechenknoten",
+   "Confirm changes": "Änderungen übernehmen",
+   "Connected": "Verbunden",
+   "Continuous": "Fortlaufend",
++  "CPU load": "CPU-Last",
+   "Create": "Anlegen",
+   "Create Plan": "Plan anlegen",
+   "Create zones": "Zonen bilden",
+@@ -83,6 +91,7 @@ export default {
+   "Creating zones failed: ": "Zonenbildung fehlgeschlagen: ",
+   "Creator": "Ersteller",
+   "Custom Flight Area": "Eigene Flugzonen",
++  "daily": "täglich",
+   "Data is not available, please restart the remote control.": "Keine Daten verfügbar, bitte die Fernsteuerung neu starten.",
+   "Data synced": "Synchronisiert",
+   "Data will not be synchronized between DJI Pilot and this server after exiting.": "Nach dem Beenden werden keine Daten mehr zwischen DJI Pilot und diesem Server synchronisiert.",
+@@ -111,6 +120,7 @@ export default {
+   "Disable": "Deaktivieren",
+   "Disabled": "Deaktiviert",
+   "Disconnect": "Getrennt",
++  "Disconnected": "Getrennt",
+   "Distance to Home Point": "Entfernung zum Homepoint",
+   "DJI index image": "DJI-Indexbild",
+   "Dock": "Dock",
+@@ -164,6 +174,7 @@ export default {
+   "FileSize": "Dateigröße",
+   "Filter": "Filter",
+   "Filter values not available (mapping service not reachable)": "Filterwerte nicht verfügbar (Mapping-Dienst nicht erreichbar)",
++  "Firmware update": "Firmware-Update",
+   "Firmware Version": "Firmware-Version",
+   "Firmwares": "Firmware",
+   "Fixed": "Fest",
+@@ -181,6 +192,7 @@ export default {
+   "Flight sets not available (mapping service not reachable)": "Flugsätze nicht verfügbar (Mapping-Dienst nicht erreichbar)",
+   "Flights": "Flüge",
+   "Fly to": "Anfliegen",
++  "Forced landing": "Erzwungene Landung",
+   "Format error. Please select zip file.": "Falsches Format. Bitte eine ZIP-Datei wählen.",
+   "fps": "fps",
+   "Frame Rate:": "Bildrate:",
+@@ -194,16 +206,20 @@ export default {
+   "GPS": "GPS",
+   "Grid size, e.g. working width or section width": "Rasterweite, z. B. Arbeitsbreite oder Teilbreite",
+   "Ground test": "Bodentest",
++  "H": "H",
+   "HD": "HD",
+   "Height": "Höhe",
+   "Height (m)": "Höhe (m)",
+   "height(m):": "Höhe (m):",
++  "Hide flight data on the map": "Flugdaten auf der Karte ausblenden",
+   "High": "Hoch",
+   "high": "Hoch",
+   "high (with surface model)": "hoch (mit Oberflächenmodell)",
+   "Hms Info": "HMS-Meldungen",
+   "Hms Message": "HMS-Meldung",
++  "Home": "Home",
+   "Horizontal Speed": "Horizontalgeschwindigkeit",
++  "Host data from {0}": "Host-Daten {0}",
+   "Hover": "Schweben",
+   "Images ({0} selected of {1})": "Bilder ({0} von {1} ausgewählt)",
+   "Immediate": "Sofort",
+@@ -233,7 +249,11 @@ export default {
+   "KML": "KML",
+   "l/ha": "l/ha",
+   "Land": "Landen",
++  "Landing": "Landung",
++  "Last backup {0}": "Letztes Backup {0}",
+   "Last Online": "Zuletzt online",
++  "last seen {0}": "zuletzt {0}",
++  "Last upload": "Letzter Upload",
+   "latitude": "Breite",
+   "latitude:": "Breite:",
+   "Latitude:": "Breite:",
+@@ -250,6 +270,7 @@ export default {
+   "loading": "wird geladen",
+   "locked:": "gesperrt:",
+   "Log Out": "Abmelden",
++  "Logged in as {0}": "Angemeldet als {0}",
+   "Login": "Anmelden",
+   "Login Success": "Anmeldung erfolgreich",
+   "longitude": "Länge",
+@@ -258,16 +279,20 @@ export default {
+   "Lost Action": "Aktion bei Signalverlust",
+   "Lost Action:": "Aktion bei Signalverlust:",
+   "Management zones and application maps (Farming Guide)": "Zonen und Applikationskarten (Farming Guide)",
++  "Manual flight": "Manueller Flug",
++  "manual only": "nur manuell",
+   "Map Element": "Kartenelement",
+   "Mapping": "Kartierung",
+   "Mapping flight": "Kartierungsflug",
+   "Mapping job": "Kartierungsauftrag",
+   "Mapping job created ({0} images)": "Kartierungsauftrag angelegt ({0} Bilder)",
++  "Mapping jobs": "Kartierungsaufträge",
+   "Mapping service not reachable": "Mapping-Dienst nicht erreichbar",
+   "Margin (m)": "Rand (m)",
+   "mean": "Mittel",
+   "Mean": "Mittel",
+   "Media": "Medien",
++  "Media data (MinIO)": "Mediendaten (MinIO)",
+   "Media File Remain Upload": "Noch hochzuladende Mediendateien",
+   "Media File Upload": "Medien-Upload",
+   "Media Files": "Mediendateien",
+@@ -278,6 +303,7 @@ export default {
+   "Method": "Methode",
+   "Min. area (m2)": "Mindestfläche (m²)",
+   "Mine": "Eigene",
++  "missing": "fehlt",
+   "mixed": "gemischt",
+   "Model": "Modell",
+   "Model / Exposure": "Modell / Belichtung",
+@@ -300,28 +326,37 @@ export default {
+   "NDVI preview (Mavic 3M)": "NDVI-Vorschau (Mavic 3M)",
+   "NDVI preview not available (farming service not reachable)": "NDVI-Vorschau nicht verfügbar (Farming-Dienst nicht erreichbar)",
+   "Network State": "Netzwerkstatus",
++  "never connected": "noch nie verbunden",
+   "New": "Neu",
++  "New flight sets": "Neue Flugsätze",
+   "New job": "Neuer Auftrag",
+   "New mapping job": "Neuer Kartierungsauftrag",
+   "New mission with the same purpose, site, drone, pilot and routes": "Neuer Einsatz mit gleichem Zweck, Ort, Drohne, Pilot und Routen",
+   "New PV inspection": "Neue PV-Inspektion",
+   "No": "Nein",
++  "No backup yet": "Noch kein Backup",
+   "no daylight": "ohne Tageslicht",
+   "No Drone": "Keine Drohne",
+   "No drone serial (video)": "Keine Seriennummer (Video)",
+   "No flight sets yet": "Noch keine Flugsätze",
++  "No host data: run edge/status.sh --install-cron on the server.": "Keine Host-Daten: auf dem Server edge/status.sh --install-cron ausführen.",
+   "No jobs. Processing runs on the x64 compute node.": "Keine Aufträge. Gerechnet wird auf dem x64-Rechenknoten.",
+   "No matching flight yet: photos appear here after the upload from Pilot 2 or the SD import (same day and drone).": "Noch kein passender Flug: Fotos erscheinen hier nach dem Upload aus Pilot 2 oder dem SD-Import (gleicher Tag und gleiche Drohne).",
+   "No media files": "Keine Mediendateien",
++  "No missions planned for today": "Heute keine Einsätze geplant",
+   "No reflectance panel: compare values within this flight only": "Ohne Kalibrierpanel: Werte nur innerhalb dieses Fluges vergleichen",
++  "No remote controller connected. Devices appear here as soon as Pilot 2 is logged in.": "Keine Fernsteuerung verbunden. Geräte erscheinen hier, sobald Pilot 2 angemeldet ist.",
+   "No results yet.": "Noch keine Ergebnisse.",
+   "No synchronization": "Keine Synchronisierung",
+   "None": "Keine",
++  "none open": "keine offen",
++  "not reachable": "nicht erreichbar",
+   "Note: Obtain The Following Parameters From https://console.agora.io": "Hinweis: Die folgenden Parameter stammen aus https://console.agora.io",
+   "Oblique flight": "Schrägflug",
+   "Offline": "Offline",
+   "OK": "OK",
+   "Online": "Online",
++  "online": "online",
+   "Opacity": "Deckkraft",
+   "Open": "Offen",
+   "Open 3rd Party APP": "Drittanbieter-App öffnen",
+@@ -366,15 +401,19 @@ export default {
+   "Positions not available": "Aufnahmepunkte nicht verfügbar",
+   "positions on the map": "Aufnahmepunkte auf der Karte",
+   "PPK raw data available: edge/ppk.sh {0} <base station folder>": "PPK-Rohdaten vorhanden: edge/ppk.sh {0} <Ordner mit Basisdaten>",
++  "Preparing": "Startvorbereitung",
+   "Preview": "Vorschau",
+   "Preview Photo": "Vorschaubild",
+   "Product, e.g. KAS 27": "Produkt, z. B. KAS 27",
+   "Profile": "Profil",
+   "PV inspection": "PV-Inspektion",
++  "PV inspections": "PV-Inspektionen",
+   "Quick look without orthomosaic: reflectance-calibrated, bands aligned, lens distortion not removed.": "Schnellansicht ohne Orthomosaik: auf Reflexion kalibriert, Bänder überlagert, Objektivverzeichnung nicht entfernt.",
+   "Rainfall": "Niederschlag",
++  "RAM {0} free": "RAM {0} frei",
+   "Rates saved": "Mengen gespeichert",
+   "RC Battery Level": "Akku Fernsteuerung",
++  "Ready to take off": "Startbereit",
+   "Refresh": "Aktualisieren",
+   "Refresh Live Capacity": "Kameraliste aktualisieren",
+   "rel": "rel.",
+@@ -394,6 +433,7 @@ export default {
+   "Return Home Cancel": "Rückkehr abbrechen",
+   "Return home successful": "Rückkehr eingeleitet",
+   "Return to Home": "Rückkehr zum Startpunkt",
++  "Return to home": "Rückkehr zum Startpunkt",
+   "Return-to-Home Altitude(m):": "Rückkehrhöhe (m):",
+   "Return-to-Home Mode:": "Rückkehrmodus:",
+   "RGB": "RGB",
+@@ -401,6 +441,7 @@ export default {
+   "RGB only": "Nur RGB",
+   "Route \"{0}\" is planned for {1}, the mission drone is a {2}: Pilot 2 does not offer it for this drone.": "Route „{0}“ ist für {1} geplant, die Einsatzdrohne ist eine {2}: Pilot 2 bietet sie für diese Drohne nicht an.",
+   "Route cannot be shown: mapping service not reachable or file unreadable": "Route kann nicht angezeigt werden: Mapping-Dienst nicht erreichbar oder Datei unlesbar",
++  "Route flight": "Routenflug",
+   "Route/drone": "Route/Drohne",
+   "RTH Altitude Relative to Dock (m)": "Rückkehrhöhe über Dock (m)",
+   "RTK": "RTK",
+@@ -435,6 +476,7 @@ export default {
+   "Shapefile": "Shapefile",
+   "Shot": "Aufnahme",
+   "shots": "Aufnahmen",
++  "Show flight data on the map": "Flugdaten auf der Karte anzeigen",
+   "Show media": "Medien anzeigen",
+   "Show on map / edit": "Auf Karte zeigen / bearbeiten",
+   "Show only this flight set": "Nur diesen Flugsatz zeigen",
+@@ -447,12 +489,14 @@ export default {
+   "Speed (m/s)": "Geschwindigkeit (m/s)",
+   "Standard": "Standard",
+   "standard": "Standard",
++  "Standby": "Bereitschaft",
+   "Start Recording": "Aufnahme starten",
+   "Start Recording successfully": "Aufnahme gestartet",
+   "Start task when battery level reaches": "Aufgabe starten ab Akkustand",
+   "Start task when storage level reaches (MB)": "Aufgabe starten ab freiem Speicher (MB)",
+   "Start Time": "Startzeit",
+   "Status": "Status",
++  "Status not available (mapping service not reachable)": "Status nicht verfügbar (Mapping-Dienst nicht erreichbar)",
+   "Stop": "Stopp",
+   "Stop Fly to": "Anflug stoppen",
+   "Stop fly to": "Anflug stoppen",
+@@ -468,6 +512,8 @@ export default {
+   "Sync": "Synchronisieren",
+   "Sync Across Devices": "Auf Geräte synchronisieren",
+   "Syncing to {0} devices": "Synchronisiere auf {0} Geräte",
++  "System": "System",
++  "System disk (SD card)": "Systemplatte (SD-Karte)",
+   "Take off": "Starten",
+   "Take off successfully": "Gestartet",
+   "Take Photo": "Foto aufnehmen",
+@@ -489,6 +535,7 @@ export default {
+   "The total number of times the dock has performed missions.": "Anzahl der vom Dock ausgeführten Einsätze.",
+   "Thermal": "Wärmebild",
+   "thermal": "Wärmebild",
++  "Three-propeller landing": "Notlandung mit drei Rotoren",
+   "Time": "Zeit",
+   "Time (UTC)": "Zeit (UTC)",
+   "Timed": "Geplant",
+@@ -505,6 +552,7 @@ export default {
+   "unknown": "unbekannt",
+   "unknown drone": "unbekannte Drohne",
+   "unpublish live": "Livestream beendet",
++  "up {0}": "läuft seit {0}",
+   "Update at {0}": "Aktualisiert {0}",
+   "Update Clarity": "Qualität ändern",
+   "Upload Media File successfully": "Mediendatei hochgeladen",
+@@ -523,6 +571,7 @@ export default {
+   "Visible (thermal pair)": "Sichtbar (zum Wärmebild)",
+   "waiting": "wartet",
+   "Waiting for a compute node (x64 with NodeODM) to pick it up.": "Wartet, bis ein Rechenknoten (x64 mit NodeODM) ihn abholt.",
++  "Waiting for flight data (drone switched on?)": "Warte auf Flugdaten (Drohne eingeschaltet?)",
+   "Waiting to upload": "Wartet auf Upload",
+   "waring: not select live para!!!": "Hinweis: Keine Stream-Parameter gewählt.",
+   "Wayline file deleted": "Flugroute gelöscht",
+@@ -549,16 +598,25 @@ export default {
+   "Zoom to result": "Auf Ergebnis zoomen",
+   "{0} % valid": "{0} % gültig",
+   "{0} corners": "{0} Ecken",
++  "{0} days": "{0} Tagen",
+   "{0} expired lease(s)": "{0} abgelaufene Lease(s)",
++  "{0} files uploaded in 24 h": "{0} Dateien in 24 h hochgeladen",
++  "{0} free of {1}": "{0} frei von {1}",
+   "{0} h apart": "{0} h vom Plan entfernt",
++  "{0} health messages": "{0} Gerätemeldungen",
+   "{0} images": "{0} Bilder",
+   "{0} jobs": "{0} Aufträge",
+   "{0} min apart": "{0} min vom Plan entfernt",
++  "{0} missions today": "{0} Einsätze heute",
+   "{0} photos of this flight set; the job waits until a compute node picks it up.": "{0} Fotos dieses Flugsatzes; der Auftrag wartet, bis ein Rechenknoten ihn abholt.",
+   "{0} PPK camera positions are used instead of the EXIF positions": "{0} PPK-Kamerapositionen ersetzen die EXIF-Positionen",
+   "{0} routes are shown only. Area routes (mapping2d) can be edited here; edit this route in Pilot 2.": "{0}-Routen werden nur angezeigt. Hier lassen sich Flächenrouten (mapping2d) bearbeiten; diese Route bitte in Pilot 2 bearbeiten.",
++  "{0} running": "{0} laufen",
++  "{0} running or waiting": "{0} laufen oder warten",
+   "{0} thermal images with the default parameters (emissivity 0.85, reflected temperature 23 °C, minimum difference 3 K). Details can be changed on the Photovoltaics page.": "{0} Wärmebilder mit den Standardwerten (Emissionsgrad 0,85, reflektierte Temperatur 23 °C, Mindestdifferenz 3 K). Einzelheiten lassen sich auf der Photovoltaik-Seite anpassen.",
++  "{0} to evaluate": "{0} auszuwerten",
+   "{0} uploaded successfully": "{0} erfolgreich hochgeladen",
++  "{0} waiting": "{0} warten",
+   "{0} waypoints computed by Pilot 2": "{0} Wegpunkte (von Pilot 2 berechnet)",
+   "{0} zones": "{0} Zonen",
+   "上传日志": "Logs hochladen",
+diff --git a/src/pages/page-web/projects/missions.vue b/src/pages/page-web/projects/missions.vue
+index 13e655c..d8deb9e 100644
+--- a/src/pages/page-web/projects/missions.vue
++++ b/src/pages/page-web/projects/missions.vue
+@@ -39,7 +39,7 @@
+             </a-tooltip>
+             <span v-if="m.flight_sets.length" class="ok"><CameraOutlined /> {{ m.flight_sets.reduce((n, s) => n + s.shots, 0) }} {{ $t('shots') }}</span>
+             <span v-else-if="m.suggested_sets.length" class="suggest"><BulbOutlined /> {{ $t('Flight found') }}</span>
+-            <span v-if="m.jobs.length" class="dim"><a-badge :status="jobBadge(m)" />{{ $t('{0} jobs', [m.jobs.length]) }}</span>
++            <span v-if="m.jobs.length" class="dim"><a-badge :status="jobBadge(m)" />{{ $t('{0} jobs', m.jobs.length) }}</span>
+           </div>
+ 
+           <div v-if="openId === m.id" class="detail">
+@@ -116,7 +116,7 @@
+           </div>
+         </div>
+         <a-button v-if="group.key === 'past'" size="small" type="link" class="more" @click="loadOlder">
+-          {{ $t('Load older missions (currently {0} days)', [days]) }}
++          {{ $t('Load older missions (currently {0} days)', days) }}
+         </a-button>
+       </div>
+     </div>
+@@ -266,7 +266,7 @@ function fmtLocal (local: string): string {
+   return `${local.slice(8, 10)}.${local.slice(5, 7)}. ${local.slice(11, 16)}`
+ }
+ function gapText (min: number): string {
+-  return min < 60 ? t('{0} min apart', [min]) : t('{0} h apart', [(min / 60).toLocaleString('de-DE', { maximumFractionDigits: 1 })])
++  return min < 60 ? t('{0} min apart', min) : t('{0} h apart', (min / 60).toLocaleString('de-DE', { maximumFractionDigits: 1 }))
+ }
+ function doneCount (m: Mission) { return m.checklist.filter(c => c.done).length }
+ function checkPercent (m: Mission) { return m.checklist.length ? Math.round(doneCount(m) / m.checklist.length * 100) : 0 }
+@@ -290,7 +290,7 @@ function warningsFor (droneSn: string | null | undefined, waylineIds: string[]):
+   return waylineIds.map(id => options.value.routes.find(r => r.id === id))
+     .filter(r => r && r.model_key && r.model_key !== drone.model_key)
+     .map(r => t('Route "{0}" is planned for {1}, the mission drone is a {2}: Pilot 2 does not offer it for this drone.',
+-      [r!.name, modelName(r!.model_key), modelName(drone.model_key)]))
++      r!.name, modelName(r!.model_key), modelName(drone.model_key)))
+ }
+ function routeWarnings (m: Mission) { return warningsFor(m.drone_sn, m.wayline_ids) }
+ 
+diff --git a/src/pages/page-web/projects/tsa.vue b/src/pages/page-web/projects/tsa.vue
+index 157a86b..3d885a0 100644
+--- a/src/pages/page-web/projects/tsa.vue
++++ b/src/pages/page-web/projects/tsa.vue
+@@ -1,474 +1,395 @@
+ <template>
+-  <div class="project-tsa-wrapper ">
+-    <div>
+-      <a-row>
+-        <a-col :span="1"></a-col>
+-        <a-col :span="11">{{ $t('My Username') }}</a-col>
+-        <a-col :span="11" align="right" style="font-weight: 700">{{ username }}</a-col>
+-        <a-col :span="1"></a-col>
+-      </a-row>
++  <div class="status-page">
++    <div class="head">
++      <span class="title">{{ $t('Tsa') }}</span>
++      <span class="dim">{{ updatedText }}</span>
++      <a-tooltip :title="$t('Refresh')"><ReloadOutlined class="reload" :spin="loading" @click="refresh" /></a-tooltip>
+     </div>
+-    <div class="scrollbar" :style="{ height: scorllHeight + 'px'}">
+-      <a-collapse :bordered="false" expandIconPosition="right" accordion style="background: #232323;">
+-        <a-collapse-panel :key="EDeviceTypeName.Dock" header="Dock" style="border-bottom: 1px solid #4f4f4f;">
+-          <div v-if="onlineDocks.data.length === 0" style="height: 150px; color: white;">
+-            <a-empty :image="noData" :image-style="{ height: '60px' }" />
++    <div class="body uranus-scrollbar">
++      <!-- warnings -->
++      <section>
++        <div v-if="!status && !loading" class="alert error">{{ $t('Status not available (mapping service not reachable)') }}</div>
++        <div v-else-if="status && !status.warnings.length" class="alert ok"><CheckCircleOutlined /> {{ $t('All systems OK') }}</div>
++        <div v-for="w in status?.warnings || []" :key="w.key" class="alert" :class="[w.level, { link: !!w.link }]" @click="go(w.link)">
++          <component :is="levelIcon[w.level]" /> {{ w.text }}
++        </div>
++      </section>
++
++      <!-- devices -->
++      <section>
++        <div class="section-head">{{ $t('Devices') }} <span class="count">{{ onlineDevices.length }} {{ $t('online') }}</span></div>
++        <div v-if="!onlineDevices.length" class="dim">{{ $t('No remote controller connected. Devices appear here as soon as Pilot 2 is logged in.') }}</div>
++        <div v-for="{ d, o } in deviceRows" :key="d.gateway.sn" class="device">
++          <div class="row1">
++            <span class="dot" :class="o ? modeClass(o.mode_code) : 'off'"></span>
++            <span class="name">{{ d.sn ? (d.callsign || d.model) : $t('No Drone') }}</span>
++            <span class="mode">{{ d.sn ? modeText(o?.mode_code) : '' }}</span>
++            <a-tooltip v-if="d.sn" :title="isShown(d) ? $t('Hide flight data on the map') : $t('Show flight data on the map')">
++              <a class="eye" :class="{ disabled: !o }" @click="toggleOsd(d)">
++                <EyeOutlined v-if="isShown(d)" /><EyeInvisibleOutlined v-else />
++              </a>
++            </a-tooltip>
+           </div>
+-          <div v-else class="fz12" style="color: white;">
+-            <div v-for="dock in onlineDocks.data" :key="dock.sn" style="background: #3c3c3c; height: 90px; width: 250px; margin-bottom: 10px;">
+-              <div style="border-radius: 2px; height: 100%; width: 100%;" class="flex-row flex-justify-between flex-align-center">
+-                <div style="float: left; padding: 0px 5px 8px 8px; width: 88%">
+-                  <div style="width: 80%; height: 30px; line-height: 30px; font-size: 16px;">
+-                    <a-tooltip :title="`${dock.gateway.callsign} - ${dock.callsign ?? $t('No Drone')}`">
+-                      <div class="text-hidden" style="max-width: 200px;">{{ dock.gateway.callsign }} - {{ dock.callsign ?? 'No Drone' }}</div>
+-                    </a-tooltip>
++          <template v-if="o">
++            <div class="battery">
++              <div class="bar" :style="{ width: Number(o.battery.capacity_percent) + '%' }"
++                   :class="{ low: Number(o.battery.capacity_percent) <= Number(o.battery.return_home_power || 30) }"></div>
++            </div>
++            <div class="values">
++              <span><ThunderboltOutlined /> {{ o.battery.capacity_percent }} %</span>
++              <span v-if="o.battery.remain_flight_time">{{ fmtDuration(o.battery.remain_flight_time) }}</span>
++              <span>{{ $t('H') }} {{ num(o.height) }} m</span>
++              <span>{{ num(o.horizontal_speed) }} m/s</span>
++              <span v-if="Number(o.home_distance)">{{ $t('Home') }} {{ num(o.home_distance, 0) }} m</span>
++              <span :class="{ rtk: o.position_state?.is_fixed === 2 }">
++                {{ o.position_state?.is_fixed === 2 ? 'RTK fix' : 'GNSS' }} {{ satellites(o) }}
++              </span>
++            </div>
++          </template>
++          <div v-else-if="d.sn" class="dim">{{ $t('Waiting for flight data (drone switched on?)') }}</div>
++          <div class="rc"><img :src="rc" alt="" /> {{ d.gateway.callsign || d.gateway.model }}</div>
++          <div v-for="sn in [d.sn, d.gateway.sn].filter(x => x && hmsInfo[x])" :key="sn" class="hms">
++            <a-popover trigger="click" placement="right" @visibleChange="(v) => !v && readHms(sn)">
++              <template #content>
++                <div class="hms-list">
++                  <div v-for="h in hmsInfo[sn]" :key="h.hms_id" class="hms-item" :class="hmsClass(h.level)">
++                    <div>{{ h.message_en }}</div><div class="dim">{{ h.create_time }}</div>
+                   </div>
+-                  <div class="mt5 flex-align-center flex-row flex-justify-between" style="background: #595959;">
+-                    <div class="flex-align-center flex-row">
+-                      <span class="ml5 mr5"><RobotOutlined /></span>
+-                      <div class="font-bold text-hidden" style="max-width: 80px;" :style="dockInfo[dock.gateway.sn] && dockInfo[dock.gateway.sn].basic_osd?.mode_code !== EDockModeCode.Disconnected ? 'color: #00ee8b' :  'color: red;'">
+-                        {{ dockInfo[dock.gateway.sn] ? EDockModeCode[dockInfo[dock.gateway.sn].basic_osd?.mode_code] : EDockModeCode[EDockModeCode.Disconnected] }}
+-                      </div>
+-                    </div>
+-                    <div class="mr5 flex-align-center flex-row" style="width: 85px; margin-right: 0; height: 18px;">
+-                      <div v-if="hmsInfo[dock.gateway.sn]" class="flex-align-center flex-row">
+-                          <div :class="hmsInfo[dock.gateway.sn][0].level === EHmsLevel.CAUTION ? 'caution-blink' :
+-                            hmsInfo[dock.gateway.sn][0].level === EHmsLevel.WARN ? 'warn-blink' : 'notice-blink'" style="width: 18px; height: 16px; text-align: center;">
+-                            <span :style="hmsInfo[dock.gateway.sn].length > 99 ? 'font-size: 11px' : 'font-size: 12px'">{{ hmsInfo[dock.gateway.sn].length }}</span>
+-                            <span class="fz10">{{ hmsInfo[dock.gateway.sn].length > 99 ? '+' : ''}}</span>
+-                          </div>
+-                        <a-popover trigger="click" placement="bottom" color="black" v-model:visible="hmsVisible[dock.gateway.sn]"
+-                          @visibleChange="readHms(hmsVisible[dock.gateway.sn], dock.gateway.sn)"
+-                          :overlayStyle="{width: '200px', height: '300px'}">
+-                          <div :class="hmsInfo[dock.gateway.sn][0].level === EHmsLevel.CAUTION ? 'caution' :
+-                            hmsInfo[dock.gateway.sn][0].level === EHmsLevel.WARN ? 'warn' : 'notice'" style="margin-left: 3px; width: 62px; height: 16px;">
+-                            <span class="word-loop">{{ hmsInfo[dock.gateway.sn][0].message_en }}</span>
+-                          </div>
+-                          <template #content>
+-                            <a-collapse style="background: black; height: 300px; overflow-y: auto;" :bordered="false" expand-icon-position="right" :accordion="true">
+-                              <a-collapse-panel v-for="hms in hmsInfo[dock.gateway.sn]" :key="hms.hms_id" :showArrow="false"
+-                                style=" margin: 0 auto 3px auto; border: 0; width: 140px; border-radius: 3px"
+-                                :class="hms.level === EHmsLevel.CAUTION ? 'caution' : hms.level === EHmsLevel.WARN ? 'warn' : 'notice'"
+-                                >
+-                                <template #header="{ isActive }">
+-                                  <div class="flex-row flex-align-center" style="width: 130px;">
+-                                    <div style="width: 110px;">
+-                                      <span class="word-loop">{{ hms.message_en }}</span>
+-                                    </div>
+-                                    <div style="width: 20px; height: 15px; font-size: 10px; z-index: 2 " class="flex-row flex-align-center flex-justify-center"
+-                                      :class="hms.level === EHmsLevel.CAUTION ? 'caution' : hms.level === EHmsLevel.WARN ? 'warn' : 'notice'"
+-                                    >
+-                                      <DoubleRightOutlined :rotate="isActive ? 90 : 0" />
+-                                    </div>
+-                                  </div>
+-                                </template>
++                </div>
++              </template>
++              <a :class="hmsClass(hmsInfo[sn][0].level)"><WarningOutlined /> {{ $t('{0} health messages', hmsInfo[sn].length) }}: {{ hmsInfo[sn][0].message_en }}</a>
++            </a-popover>
++          </div>
++        </div>
++        <div v-if="offlineDrones.length" class="offline">
++          <span class="dim">{{ $t('Offline') }}:</span> {{ offlineDrones.join(', ') }}
++        </div>
++      </section>
+ 
+-                                <a-tooltip :title="hms.create_time">
+-                                  <div style="color: white;" class="text-hidden">{{ hms.create_time }}</div>
+-                                </a-tooltip>
+-                              </a-collapse-panel>
+-                            </a-collapse>
+-                          </template>
+-                        </a-popover>
+-                      </div>
+-                      <div v-else class="width-100" style="height: 90%; background: rgba(0, 0, 0, 0.35)"></div>
+-                    </div>
+-                  </div>
+-                  <div class="mt5 flex-align-center flex-row flex-justify-between" style="background: #595959;">
+-                    <div class="flex-row">
+-                      <span class="ml5 mr5"><RocketOutlined /></span>
+-                      <div class="font-bold text-hidden" style="max-width: 80px" :style="deviceInfo[dock.sn] && deviceInfo[dock.sn].mode_code !== EModeCode.Disconnected ? 'color: #00ee8b' :  'color: red;'">
+-                        {{ deviceInfo[dock.sn] ? EModeCode[deviceInfo[dock.sn].mode_code] : EModeCode[EModeCode.Disconnected] }}
+-                      </div>
+-                    </div>
+-                    <div class="mr5 flex-align-center flex-row" style="width: 85px; margin-right: 0; height: 18px;">
+-                      <div v-if="hmsInfo[dock.sn]" class="flex-align-center flex-row">
+-                        <div :class="hmsInfo[dock.sn][0].level === EHmsLevel.CAUTION ? 'caution-blink' :
+-                          hmsInfo[dock.sn][0].level === EHmsLevel.WARN ? 'warn-blink' : 'notice-blink'" style="width: 18px; height: 16px; text-align: center;">
+-                          <span :style="hmsInfo[dock.sn].length > 99 ? 'font-size: 11px' : 'font-size: 12px'">{{ hmsInfo[dock.sn].length }}</span>
+-                          <span class="fz10">{{ hmsInfo[dock.sn].length > 99 ? '+' : ''}}</span>
+-                        </div>
+-                        <a-popover trigger="click" placement="bottom" color="black" v-model:visible="hmsVisible[dock.sn]" @visibleChange="readHms(hmsVisible[dock.sn], dock.sn)"
+-                          :overlayStyle="{width: '200px', height: '300px'}">
+-                          <div :class="hmsInfo[dock.sn][0].level === EHmsLevel.CAUTION ? 'caution' :
+-                            hmsInfo[dock.sn][0].level === EHmsLevel.WARN ? 'warn' : 'notice'" style="margin-left: 3px; width: 62px; height: 16px;">
+-                            <span class="word-loop">{{ hmsInfo[dock.sn][0].message_en }}</span>
+-                          </div>
+-                          <template #content>
+-                            <a-collapse style="background: black; height: 300px; overflow-y: auto;" :bordered="false" expand-icon-position="right" :accordion="true">
+-                              <a-collapse-panel v-for="hms in hmsInfo[dock.sn]" :key="hms.hms_id" :showArrow="false"
+-                                style=" margin: 0 auto 3px auto; border: 0; width: 140px; border-radius: 3px"
+-                                :class="hms.level === EHmsLevel.CAUTION ? 'caution' : hms.level === EHmsLevel.WARN ? 'warn' : 'notice'"
+-                                >
+-                                <template #header="{ isActive }">
+-                                  <div class="flex-row flex-align-center" style="width: 130px;">
+-                                    <div style="width: 110px;">
+-                                      <span class="word-loop">{{ hms.message_en }}</span>
+-                                    </div>
+-                                    <div style="width: 20px; height: 15px; font-size: 10px; z-index: 2 " class="flex-row flex-align-center flex-justify-center"
+-                                      :class="hms.level === EHmsLevel.CAUTION ? 'caution' : hms.level === EHmsLevel.WARN ? 'warn' : 'notice'"
+-                                    >
+-                                      <DoubleRightOutlined :rotate="isActive ? 90 : 0" />
+-                                    </div>
+-                                  </div>
+-                                </template>
++      <!-- today -->
++      <section v-if="status">
++        <div class="section-head">{{ $t('Today') }}</div>
++        <div class="line link" @click="go('task')">
++          <CalendarOutlined />
++          <span v-if="!status.today.missions.length" class="dim">{{ $t('No missions planned for today') }}</span>
++          <span v-else>{{ $t('{0} missions today', status.today.missions.length) }}</span>
++          <span v-if="status.today.to_evaluate" class="badge">{{ $t('{0} to evaluate', status.today.to_evaluate) }}</span>
++        </div>
++        <div v-for="m in status.today.missions" :key="m.id" class="sub link" @click="go('task')">
++          {{ fmtClock(m.planned_start) }} {{ m.title }}
++          <a-tag :color="missionColor(m.status)" class="tag">{{ $t(m.status) }}</a-tag>
++        </div>
++        <div class="line link" @click="go('media')">
++          <CloudUploadOutlined />
++          <span>{{ $t('{0} files uploaded in 24 h', status.today.uploads_24h) }}</span>
++        </div>
++        <div v-for="u in status.today.uploads_by_drone" :key="u.drone" class="sub">
++          {{ u.name || (u.drone ? '…' + u.drone.slice(-5) : $t('unknown drone')) }}: {{ u.files }}
++        </div>
++        <div v-if="status.today.last_upload" class="sub dim">{{ $t('Last upload') }} {{ fmtDateTime(status.today.last_upload) }}</div>
++        <div v-if="status.today.flight_sets_24h.length" class="line"><ApartmentOutlined /> {{ $t('New flight sets') }}</div>
++        <div v-for="s in status.today.flight_sets_24h.slice(0, 6)" :key="s.id" class="sub link" @click="go('flight-sets', { set: s.id.slice(0, 8) })">
++          {{ fmtLocal(s.first_capture) }} · {{ s.drone_name || '…' + s.drone.slice(-5) }} · {{ s.shots }} {{ $t('shots') }}
++        </div>
++        <div v-if="status.today.flight_sets_24h.length > 6" class="sub dim link" @click="go('flight-sets')">
++          {{ $t('and {0} more', status.today.flight_sets_24h.length - 6) }}
++        </div>
++        <div class="line link" @click="go('mapping')">
++          <GlobalOutlined />
++          <span>{{ $t('Mapping jobs') }}:</span>
++          <span v-if="!status.jobs.active.length" class="dim">{{ $t('none open') }}</span>
++          <span v-else>{{ jobSummary }}</span>
++        </div>
++        <div v-for="j in status.jobs.active.filter(j => j.status !== 'QUEUED')" :key="j.id" class="sub">
++          {{ j.name }} <a-progress :percent="Math.round(j.progress)" size="small" class="progress" />
++        </div>
++        <div class="line link" @click="go('photovoltaik')">
++          <ThunderboltOutlined />
++          <span>{{ $t('PV inspections') }}:</span>
++          <span v-if="pvOpen === null" class="dim">{{ $t('not reachable') }}</span>
++          <span v-else-if="!pvOpen.length" class="dim">{{ $t('none open') }}</span>
++          <span v-else>{{ $t('{0} running or waiting', pvOpen.length) }}</span>
++        </div>
++      </section>
+ 
+-                                <a-tooltip :title="hms.create_time">
+-                                  <div style="color: white;" class="text-hidden">{{ hms.create_time }}</div>
+-                                </a-tooltip>
+-                              </a-collapse-panel>
+-                            </a-collapse>
+-                          </template>
+-                        </a-popover>
+-                      </div>
+-                      <div v-else class="width-100" style="height: 90%; background: rgba(0, 0, 0, 0.35)"></div>
+-                    </div>
+-                  </div>
+-                </div>
+-                <div style="float: right; background: #595959; height: 100%; width: 40px;" class="flex-row flex-justify-center flex-align-center">
+-                  <div class="fz16" @click="switchVisible($event, dock, true, dockInfo[dock.gateway.sn] && dockInfo[dock.gateway.sn].basic_osd?.mode_code !== EDockModeCode.Disconnected)">
+-                    <a v-if="osdVisible.gateway_sn === dock.gateway.sn && osdVisible.visible"><EyeOutlined /></a>
+-                    <a v-else><EyeInvisibleOutlined /></a>
+-                  </div>
+-                </div>
+-              </div>
++      <!-- system -->
++      <section v-if="status">
++        <div class="section-head">{{ $t('System') }}
++          <span v-if="status.host" class="count">{{ status.host.hostname }} · {{ $t('up {0}', fmtDuration(status.host.uptime_s)) }}</span>
++        </div>
++        <div class="services">
++          <a-tooltip v-for="s in status.services" :key="s.name" :title="s.ok ? s.ms + ' ms' : s.detail">
++            <span class="service"><span class="dot" :class="s.ok ? 'green' : 'red'"></span>{{ s.label }}</span>
++          </a-tooltip>
++        </div>
++        <template v-if="status.host">
++          <div v-for="d in status.host.disks" :key="d.name" class="disk">
++            <div class="disk-head">
++              <span>{{ $t(diskLabel[d.name]) }}</span>
++              <span v-if="d.total" class="dim">{{ $t('{0} free of {1}', fmtBytes(d.free || 0), fmtBytes(d.total)) }}</span>
++              <span v-else class="err">{{ $t('missing') }}</span>
+             </div>
++            <a-progress v-if="d.total" :percent="usedPercent(d)" :show-info="false" size="small"
++                        :stroke-color="usedPercent(d) >= 95 ? '#f5222d' : usedPercent(d) >= 90 ? '#faad14' : '#2d8cf0'" />
++            <div class="dim path">{{ d.mount ? d.mount + ' (' + d.device + ')' : d.path }}</div>
+           </div>
+-        </a-collapse-panel>
+-      </a-collapse>
+-      <a-collapse :bordered="false" expandIconPosition="right" accordion style="background: #232323;">
+-        <a-collapse-panel :key="EDeviceTypeName.Aircraft" header="Online Devices" style="border-bottom: 1px solid #4f4f4f;">
+-          <div v-if="onlineDevices.data.length === 0" style="height: 150px; color: white;">
+-            <a-empty :image="noData" :image-style="{ height: '60px' }" />
++          <div class="line">
++            <SaveOutlined />
++            <span v-if="status.host.backup.last_success">{{ $t('Last backup {0}', fmtAgo(status.host.backup.last_success)) }}</span>
++            <span v-else class="err">{{ $t('No backup yet') }}</span>
++            <a-tag :color="status.host.backup.cron ? 'green' : 'orange'" class="tag">{{ status.host.backup.cron ? $t('daily') : $t('manual only') }}</a-tag>
+           </div>
+-          <div v-else class="fz12" style="color: white;">
+-            <div v-for="device in onlineDevices.data" :key="device.sn" style="background: #3c3c3c; height: 90px; width: 250px; margin-bottom: 10px;">
+-              <div class="battery-slide" v-if="deviceInfo[device.sn]">
+-                <div style="background: #535759; width: 100%;"></div>
+-                <div class="capacity-percent" :style="{ width: deviceInfo[device.sn].battery.capacity_percent + '%'}"></div>
+-                <div class="return-home" :style="{ width: deviceInfo[device.sn].battery.return_home_power + '%'}"></div>
+-                <div class="landing" :style="{ width: deviceInfo[device.sn].battery.landing_power + '%'}"></div>
+-                <div class="battery" :style="{ left: deviceInfo[device.sn].battery.capacity_percent + '%' }"></div>
+-              </div>
+-              <div style="border-bottom: 1px solid #515151; border-radius: 2px; height: 50px; width: 100%;" class="flex-row flex-justify-between flex-align-center">
+-                <div style="float: left; padding: 5px 5px 8px 8px; width: 88%">
+-                  <div style="width: 100%; height: 100%;">
+-                    <a-tooltip>
+-                      <template #title>{{ device.model ? `${device.model} - ${device.callsign}` : 'No Drone'}}</template>
+-                      <span class="text-hidden" style="max-width: 200px; display: block; height: 20px;">{{ device.model ? `${device.model} - ${device.callsign}` : 'No Drone'}}</span>
+-                    </a-tooltip>
+-                  </div>
+-                  <div class="mt5" style="background: #595959;">
+-                    <span class="ml5 mr5"><RocketOutlined /></span>
+-                    <span class="font-bold" :style="deviceInfo[device.sn] && deviceInfo[device.sn].mode_code !== EModeCode.Disconnected ? 'color: #00ee8b' :  'color: red;'">
+-                      {{ deviceInfo[device.sn] ? EModeCode[deviceInfo[device.sn].mode_code] : EModeCode[EModeCode.Disconnected] }}
+-                    </span>
+-                  </div>
+-                </div>
+-                <div style="float: right; background: #595959; height: 50px; width: 40px;" class="flex-row flex-justify-center flex-align-center">
+-                  <div class="fz16" @click="switchVisible($event, device, false, deviceInfo[device.sn] && deviceInfo[device.sn].mode_code !== EModeCode.Disconnected)">
+-                    <a v-if="osdVisible.sn === device.sn && osdVisible.visible"><EyeOutlined /></a>
+-                    <a v-else><EyeInvisibleOutlined /></a>
+-                  </div>
+-                </div>
+-              </div>
+-              <div class="flex-row flex-justify-center flex-align-center" style="height: 40px;">
+-                <div class="flex-row" style="height: 20px; background: #595959; width: 94%;" >
+-                  <span class="mr5"><a-image style="margin-left: 2px; margin-top: -2px; height: 20px; width: 20px;" :src="rc" /></span>
+-                  <a-tooltip>
+-                    <template #title>{{ device.gateway.model }} - {{ device.gateway.callsign }} </template>
+-                    <div class="text-hidden" style="max-width: 200px;">{{ device.gateway.model }} - {{ device.gateway.callsign }}</div>
+-                  </a-tooltip>
+-                </div>
+-              </div>
+-            </div>
++          <div class="line">
++            <DashboardOutlined />
++            <span v-if="status.host.temp_c !== null">{{ status.host.temp_c.toLocaleString('de-DE') }} °C</span>
++            <span>{{ $t('CPU load') }} {{ status.host.load[0].toLocaleString('de-DE', { maximumFractionDigits: 1 }) }}/{{ status.host.cpu_count }}</span>
++            <span v-if="status.host.mem_total">{{ $t('RAM {0} free', fmtBytes(status.host.mem_available || 0)) }}</span>
+           </div>
+-        </a-collapse-panel>
+-      </a-collapse>
++        </template>
++        <div v-else class="dim">{{ $t('No host data: run edge/status.sh --install-cron on the server.') }}</div>
++        <div class="line">
++          <CloudServerOutlined />
++          <span>{{ $t('Compute node') }}:</span>
++          <span v-if="!status.agents.length" class="dim">{{ $t('never connected') }}</span>
++          <span v-else :class="agentOnline ? 'okc' : 'dim'">
++            {{ agentOnline ? $t('online') : $t('last seen {0}', fmtAgo(status.agents[0].last_seen)) }}
++            ({{ status.agents[0].agent_id }})
++          </span>
++        </div>
++        <div v-if="status.host" class="dim stamp">{{ $t('Host data from {0}', fmtAgo(status.host.at)) }}</div>
++      </section>
++      <div class="dim user">{{ $t('Logged in as {0}', username) }}</div>
+     </div>
+   </div>
+ </template>
+ 
+ <script lang="ts" setup>
+-import { computed, onMounted, reactive, ref, watch, WritableComputedRef } from 'vue'
+-import { EDeviceTypeName, ELocalStorageKey } from '/@/types'
+-import noData from '/@/assets/icons/no-data.png'
++// onprem: status page ("Lagebild"): warnings, devices (Pilot 2 + drone OSD), today's work, system state.
++// Replaces the DJI Dock/device panel; the eye still opens the flight data panel on the map (store osdVisible).
++import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
++import { useRouter } from 'vue-router'
++import moment from 'moment'
++import {
++  ApartmentOutlined, CalendarOutlined, CheckCircleOutlined, CloseCircleOutlined, CloudServerOutlined,
++  CloudUploadOutlined, DashboardOutlined, EyeInvisibleOutlined, EyeOutlined, GlobalOutlined, InfoCircleOutlined,
++  ReloadOutlined, SaveOutlined, ThunderboltOutlined, WarningOutlined,
++} from '@ant-design/icons-vue'
++import { t } from '/@/locales'
+ import rc from '/@/assets/icons/rc.png'
+-import { OnlineDevice, EModeCode, OSDVisible, EDockModeCode, DeviceOsd } from '/@/types/device'
++import { EDeviceTypeName, ELocalStorageKey } from '/@/types'
++import { DeviceOsd, EModeCode, OnlineDevice } from '/@/types/device'
++import { EHmsLevel } from '/@/types/enums'
+ import { useMyStore } from '/@/store'
+ import { getDeviceTopo, getUnreadDeviceHms, updateDeviceHms } from '/@/api/manage'
+-import { RocketOutlined, EyeInvisibleOutlined, EyeOutlined, RobotOutlined, DoubleRightOutlined } from '@ant-design/icons-vue'
+-import { EHmsLevel } from '/@/types/enums'
++import { DiskState, SystemStatus, getSystemStatus } from '/@/api/status'
++import { MissionStatus, STATUS_COLORS, missionOptions } from '/@/api/missions'
++import { Inspection, listInspections } from '/@/api/pv'
+ 
+ const store = useMyStore()
+-const username = ref(localStorage.getItem(ELocalStorageKey.Username))
+-const workspaceId = ref(localStorage.getItem(ELocalStorageKey.WorkspaceId)!)
+-const osdVisible = computed(() => store.state.osdVisible)
+-const hmsVisible = new Map<string, boolean>()
+-const scorllHeight = ref()
+-
+-const onlineDevices = reactive({
+-  data: [] as OnlineDevice[]
+-})
+-
+-const onlineDocks = reactive({
+-  data: [] as OnlineDevice[]
+-})
++const router = useRouter()
++const username = localStorage.getItem(ELocalStorageKey.Username)
++const workspaceId = localStorage.getItem(ELocalStorageKey.WorkspaceId)!
+ 
+-const deviceInfo = computed(() => store.state.deviceState.deviceInfo)
+-const dockInfo = computed(() => store.state.deviceState.dockInfo)
+-const hmsInfo = computed({
+-  get: () => store.state.hmsInfo,
+-  set: (val) => {
+-    return val
+-  }
+-})
++const status = ref<SystemStatus | null>(null)
++const loading = ref(false)
++const pvOpen = ref<Inspection[] | null>([])
++const onlineDevices = ref<OnlineDevice[]>([])
++const boundDrones = ref<{ sn: string, name: string }[]>([])
+ 
+-onMounted(() => {
+-  getOnlineTopo()
+-  setTimeout(() => {
+-    watch(() => store.state.deviceStatusEvent,
+-      data => {
+-        getOnlineTopo()
+-        if (data.deviceOnline.sn) {
+-          getUnreadHms(data.deviceOnline.sn)
+-        }
+-      },
+-      {
+-        deep: true
+-      }
+-    )
+-    getOnlineDeviceHms()
+-  }, 3000)
+-  const element = document.getElementsByClassName('scrollbar').item(0) as HTMLDivElement
+-  const parent = element?.parentNode as HTMLDivElement
+-  scorllHeight.value = parent?.clientHeight - parent?.firstElementChild?.clientHeight
+-})
++const deviceInfo = computed(() => store.state.deviceState.deviceInfo as Record<string, DeviceOsd>)
++const osdVisible = computed(() => store.state.osdVisible)
++const hmsInfo = computed(() => store.state.hmsInfo as Record<string, any[]>)
+ 
+-function getOnlineTopo () {
+-  getDeviceTopo(workspaceId.value).then((res) => {
+-    if (res.code !== 0) {
+-      return
+-    }
+-    onlineDevices.data = []
+-    onlineDocks.data = []
+-    res.data.forEach((gateway: any) => {
+-      const child = gateway.children
+-      const device: OnlineDevice = {
+-        model: child?.device_name,
+-        callsign: child?.nickname,
+-        sn: child?.device_sn,
+-        mode: EModeCode.Disconnected,
+-        gateway: {
+-          model: gateway?.device_name,
+-          callsign: gateway?.nickname,
+-          sn: gateway?.device_sn,
+-          domain: gateway?.domain
+-        },
+-        payload: []
+-      }
+-      child?.payloads_list.forEach((payload: any) => {
+-        device.payload.push({
+-          index: payload.index,
+-          model: payload.model,
+-          payload_name: payload.payload_name,
+-          payload_sn: payload.payload_sn,
+-          control_source: payload.control_source,
+-          payload_index: payload.payload_index
+-        })
+-      })
+-      if (EDeviceTypeName.Dock === gateway.domain) {
+-        hmsVisible.set(device.sn, false)
+-        hmsVisible.set(device.gateway.sn, false)
+-        onlineDocks.data.push(device)
+-      }
+-      if (gateway.status && EDeviceTypeName.Gateway === gateway.domain) {
+-        onlineDevices.data.push(device)
+-      }
+-    })
+-  })
++const levelIcon = { error: CloseCircleOutlined, warning: WarningOutlined, info: InfoCircleOutlined }
++const diskLabel: Record<DiskState['name'], string> = { system: 'System disk (SD card)', minio: 'Media data (MinIO)', backup: 'Backup disk' }
++// flight modes (EModeCode) in German via the locale
++const modeLabel: Record<number, string> = {
++  [EModeCode.Standby]: 'Standby', [EModeCode.Preparing]: 'Preparing', [EModeCode.Ready]: 'Ready to take off',
++  [EModeCode.Manual]: 'Manual flight', [EModeCode.Automatic]: 'Automatic flight', [EModeCode.Waypoint]: 'Route flight',
++  [EModeCode.Panoramic]: 'Panorama', [EModeCode.Active_Track]: 'ActiveTrack', [EModeCode.ADS_B]: 'ADS-B avoidance',
++  [EModeCode.Return_To_Home]: 'Return to home', [EModeCode.Landing]: 'Landing', [EModeCode.Forced_Landing]: 'Forced landing',
++  [EModeCode.Three_Blades_Landing]: 'Three-propeller landing', [EModeCode.Upgrading]: 'Firmware update',
++  [EModeCode.Disconnected]: 'Disconnected',
+ }
+ 
+-function switchVisible (e: any, device: OnlineDevice, isDock: boolean, isClick: boolean) {
+-  if (!isClick) {
+-    e.target.style.cursor = 'not-allowed'
+-    return
+-  }
+-  if (device.sn === osdVisible.value.sn) {
+-    osdVisible.value.visible = !osdVisible.value.visible
+-  } else {
+-    osdVisible.value.sn = device.sn
+-    osdVisible.value.callsign = device.callsign
+-    osdVisible.value.model = device.model
+-    osdVisible.value.visible = true
+-    osdVisible.value.gateway_sn = device.gateway.sn
+-    osdVisible.value.is_dock = isDock
+-    osdVisible.value.gateway_callsign = device.gateway.callsign
+-    osdVisible.value.payloads = device.payload
+-  }
+-  store.commit('SET_OSD_VISIBLE_INFO', osdVisible)
++// ---------------------------------------------------------------- formatting
++function num (v: string | number | undefined, digits = 1): string {
++  const n = Number(v)
++  return Number.isFinite(n) ? n.toLocaleString('de-DE', { maximumFractionDigits: digits }) : '-'
+ }
+-
+-function getUnreadHms (sn: string) {
+-  getUnreadDeviceHms(workspaceId.value, sn).then(res => {
+-    if (res.data.length !== 0) {
+-      hmsInfo.value[sn] = res.data
+-    }
+-  })
+-  console.info(hmsInfo.value)
++function fmtBytes (n: number): string {
++  if (n >= 1024 ** 4) return (n / 1024 ** 4).toLocaleString('de-DE', { maximumFractionDigits: 1 }) + ' TB'
++  return Math.round(n / 1024 ** 3).toLocaleString('de-DE') + ' GB'
+ }
+-
+-function getOnlineDeviceHms () {
+-  const snList = Object.keys(dockInfo.value)
+-  if (snList.length === 0) {
+-    return
+-  }
+-  snList.forEach(sn => {
+-    getUnreadHms(sn)
+-  })
+-  const deviceSnList = Object.keys(deviceInfo.value)
+-  if (deviceSnList.length === 0) {
+-    return
+-  }
+-  deviceSnList.forEach(sn => {
+-    getUnreadHms(sn)
+-  })
+-}
+-
+-function readHms (visiable: boolean, sn: string) {
+-  if (!visiable) {
+-    updateDeviceHms(workspaceId.value, sn).then(res => {
+-      if (res.code === 0) {
+-        delete hmsInfo.value[sn]
+-      }
+-    })
+-  }
++function fmtDuration (s: number): string {
++  if (s < 3600) return `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, '0')} min`
++  if (s < 2 * 86400) return `${Math.floor(s / 3600)} h`
++  return t('{0} days', Math.floor(s / 86400))
+ }
++function fmtAgo (iso: string): string { return moment(iso).fromNow() }
++function fmtClock (iso: string): string { return moment(iso).format('HH:mm') }
++function fmtDateTime (iso: string): string { return moment(iso).format('dd DD.MM. HH:mm') }
++function fmtLocal (local: string): string { return `${local.slice(8, 10)}.${local.slice(5, 7)}. ${local.slice(11, 16)}` }
++function usedPercent (d: DiskState): number { return d.total ? Math.round((1 - (d.free || 0) / d.total) * 100) : 0 }
++function missionColor (s: string): string { return STATUS_COLORS[s as MissionStatus] || 'default' }
++// agents poll every few seconds while idle (compute-agent POLL_SECONDS), so 5 minutes without contact = offline
++const agentOnline = computed(() => !!status.value?.agents.length && status.value.agents[0].age_s < 300)
++const updatedText = computed(() => status.value ? moment(status.value.now).format('HH:mm:ss') : '')
++const jobSummary = computed(() => {
++  const c = status.value?.jobs.counts || {}
++  const running = (c.RUNNING || 0) + (c.CLAIMED || 0)
++  return [running ? t('{0} running', running) : '', c.QUEUED ? t('{0} waiting', c.QUEUED) : ''].filter(Boolean).join(', ')
++})
+ 
+-function openLivestreamOthers () {
+-  store.commit('SET_LIVESTREAM_OTHERS_VISIBLE', true)
++// ---------------------------------------------------------------- devices
++function osd (d: OnlineDevice): DeviceOsd | undefined {
++  const o = deviceInfo.value[d.sn]
++  return o && o.mode_code !== EModeCode.Disconnected ? o : undefined
+ }
+-
+-function openLivestreamAgora () {
+-  store.commit('SET_LIVESTREAM_AGORA_VISIBLE', true)
++const deviceRows = computed(() => onlineDevices.value.map(d => ({ d, o: osd(d) })))
++function modeText (code?: number): string {
++  return t(modeLabel[code ?? EModeCode.Disconnected] || 'unknown')
+ }
+-
+-</script>
+-
+-<style lang="scss">
+-.project-tsa-wrapper > :first-child {
+-  height: 50px;
+-  line-height: 50px;
+-  align-items: center;
+-  border-bottom: 1px solid #4f4f4f;
++function modeClass (code: number): string {
++  if ([EModeCode.Return_To_Home, EModeCode.Forced_Landing, EModeCode.Three_Blades_Landing].includes(code)) return 'red'
++  if ([EModeCode.Manual, EModeCode.Automatic, EModeCode.Waypoint, EModeCode.Panoramic, EModeCode.Active_Track,
++    EModeCode.Landing, EModeCode.ADS_B].includes(code)) return 'blue'
++  return 'green'
+ }
+-.project-tsa-wrapper {
+-  height: 100%;
+-  .scrollbar {
+-    overflow: auto;
+-  }
+-  ::-webkit-scrollbar {
+-    display: none;
+-  }
++function satellites (o: DeviceOsd): string {
++  const p = o.position_state
++  if (!p) return ''
++  return p.is_fixed === 2 ? `(${p.rtk_number})` : `(${p.gps_number})`
+ }
+-.ant-collapse > .ant-collapse-item > .ant-collapse-header {
+-  color: white;
+-  border: 0;
+-  padding-left: 14px;
++function hmsClass (level: number): string {
++  return level === EHmsLevel.WARN ? 'hms-warn' : level === EHmsLevel.CAUTION ? 'hms-caution' : 'hms-notice'
+ }
+-
+-.text-hidden {
+-  overflow: hidden !important;
+-  text-overflow: ellipsis !important;
+-  white-space: nowrap;
+-  -o-text-overflow: ellipsis;
++const offlineDrones = computed(() => {
++  const online = new Set(onlineDevices.value.map(d => d.sn))
++  return boundDrones.value.filter(d => !online.has(d.sn)).map(d => d.name)
++})
++function isShown (d: OnlineDevice): boolean {
++  return osdVisible.value.sn === d.sn && osdVisible.value.visible
+ }
+-.font-bold {
+-  font-weight: 700;
++function toggleOsd (d: OnlineDevice) {
++  if (!osd(d)) return
++  const v = osdVisible.value
++  if (v.sn === d.sn) {
++    v.visible = !v.visible
++  } else {
++    Object.assign(v, {
++      sn: d.sn, callsign: d.callsign, model: d.model, visible: true, gateway_sn: d.gateway.sn, is_dock: false,
++      gateway_callsign: d.gateway.callsign, payloads: d.payload,
++    })
++  }
++  store.commit('SET_OSD_VISIBLE_INFO', v)
+ }
+ 
+-.battery-slide {
+-  width: 100%;
+-  .capacity-percent {
+-    background: #00ee8b;
+-  }
+-  .return-home {
+-    background: #ff9f0a;
+-  }
+-  .landing {
+-    background: #f5222d;
+-  }
+-  .battery {
+-    background: white;
+-    border-radius: 1px;
+-    width: 8px;
+-    height: 4px;
+-    margin-top: -3px;
++async function loadDevices () {
++  const res = await getDeviceTopo(workspaceId)
++  if (res.code !== 0) return
++  onlineDevices.value = res.data
++    .filter((g: any) => g.status && g.domain === EDeviceTypeName.Gateway)
++    .map((g: any) => {
++      const c = g.children
++      return {
++        model: c?.device_name, callsign: c?.nickname, sn: c?.device_sn, mode: EModeCode.Disconnected,
++        gateway: { model: g.device_name, callsign: g.nickname, sn: g.device_sn, domain: g.domain },
++        payload: (c?.payloads_list || []).map((p: any) => ({
++          index: p.index, model: p.model, payload_name: p.payload_name, payload_sn: p.payload_sn,
++          control_source: p.control_source, payload_index: p.payload_index,
++        })),
++      } as OnlineDevice
++    })
++  for (const d of onlineDevices.value) {
++    for (const sn of [d.sn, d.gateway.sn].filter(Boolean)) loadHms(sn)
+   }
+ }
+-.battery-slide > div {
+-  position: relative;
+-  margin-top: -2px;
+-  min-height: 2px;
+-  border-radius: 2px;
+-  white-space: nowrap;
++function loadHms (sn: string) {
++  getUnreadDeviceHms(workspaceId, sn).then(res => {
++    if (res.data?.length) store.state.hmsInfo[sn] = res.data
++  }).catch(() => undefined)
+ }
+-.disable {
+-  cursor: not-allowed;
++function readHms (sn: string) {
++  updateDeviceHms(workspaceId, sn).then(res => {
++    if (res.code === 0) delete store.state.hmsInfo[sn]
++  })
+ }
+ 
+-.notice-blink {
+-  background: $success;
+-  animation: blink 500ms infinite;
+-}
+-.caution-blink {
+-  background: orange;
+-  animation: blink 500ms infinite;
+-}
+-.warn-blink {
+-  background: red;
+-  animation: blink 500ms infinite;
+-}
+-.notice {
+-  background: $success;
+-  overflow: hidden;
+-  cursor: pointer;
+-}
+-.caution {
+-  background: orange;
+-  cursor: pointer;
+-  overflow: hidden;
+-}
+-.warn {
+-  background: red;
+-  cursor: pointer;
+-  overflow: hidden;
+-}
+-.word-loop {
+-  white-space: nowrap;
+-  display: inline-block;
+-  animation: 10s loop linear infinite normal;
+-}
+-@keyframes blink {
+-  from {
+-    opacity: 1;
+-  }
+-  50% {
+-    opacity: 0.35;
+-  }
+-  to {
+-    opacity: 1;
++// ---------------------------------------------------------------- refresh
++async function refresh () {
++  loading.value = true
++  try {
++    const [s] = await Promise.all([
++      getSystemStatus().catch(() => null),
++      loadDevices().catch(() => undefined),
++      listInspections().then(l => { pvOpen.value = l.filter(i => i.status === 'queued' || i.status === 'running') })
++        .catch(() => { pvOpen.value = null }),
++    ])
++    status.value = s
++  } finally {
++    loading.value = false
+   }
+ }
+-@keyframes loop {
+-  0% {
+-    transform: translateX(20px);
+-    -webkit-transform: translateX(20px);
+-  }
+-  100% {
+-    transform: translateX(-100%);
+-    -webkit-transform: translateX(-100%);
+-  }
++function go (link: string | null, query?: Record<string, string>) {
++  if (link) router.push({ path: '/' + link, query })
+ }
+ 
++let timer: number | undefined
++onMounted(() => {
++  refresh()
++  missionOptions().then(o => { boundDrones.value = o.drones }).catch(() => undefined)
++  timer = window.setInterval(refresh, 30000)
++})
++onUnmounted(() => window.clearInterval(timer))
++// a device going on- or offline (websocket event of the DJI backend) refreshes the device list
++watch(() => store.state.deviceStatusEvent, () => loadDevices().catch(() => undefined), { deep: true })
++</script>
++
++<style lang="scss" scoped>
++.status-page { height: 100%; display: flex; flex-direction: column; color: #fff; }
++.head { display: flex; align-items: center; gap: 8px; height: 50px; padding: 0 12px; border-bottom: 1px solid #4f4f4f;
++  .title { font-size: 15px; font-weight: 600; flex: 1; }
++  .reload { cursor: pointer; } }
++.body { flex: 1; min-height: 0; overflow-y: auto; padding: 8px 12px 12px; }
++section { margin-bottom: 14px; }
++.section-head { font-weight: 600; margin-bottom: 6px; .count { color: #8a8f98; font-weight: 400; font-size: 12px; margin-left: 6px; } }
++.dim { color: #8a8f98; font-size: 12px; }
++.err { color: #ff7875; }
++.okc { color: #95de64; }
++.link { cursor: pointer; &:hover { color: #69c0ff; } }
++.alert { font-size: 12px; padding: 5px 8px; border-radius: 4px; margin-bottom: 4px; border-left: 3px solid;
++  &.ok { background: rgba(82, 196, 26, 0.12); border-color: #52c41a; color: #b7eb8f; }
++  &.error { background: rgba(245, 34, 45, 0.15); border-color: #f5222d; color: #ffa39e; }
++  &.warning { background: rgba(250, 173, 20, 0.13); border-color: #faad14; color: #ffe58f; }
++  &.info { background: rgba(24, 144, 255, 0.12); border-color: #1890ff; color: #91d5ff; }
++  &.link:hover { filter: brightness(1.25); } }
++.dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 6px; flex: none;
++  &.green { background: #52c41a; } &.blue { background: #1890ff; } &.red { background: #f5222d; } &.off { background: #595959; } }
++.device { background: #2d2d2d; border-radius: 4px; padding: 6px 8px; margin-bottom: 6px;
++  .row1 { display: flex; align-items: center; gap: 6px;
++    .name { font-weight: 500; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
++    .mode { font-size: 12px; color: #d9d9d9; }
++    .eye { color: #fff; &.disabled { color: #595959; cursor: not-allowed; } } }
++  .battery { height: 4px; background: #434343; border-radius: 2px; margin: 6px 0 4px;
++    .bar { height: 100%; background: #52c41a; border-radius: 2px; &.low { background: #fa8c16; } } }
++  .values { display: flex; flex-wrap: wrap; gap: 2px 10px; font-size: 12px; color: #d9d9d9; .rtk { color: #95de64; } }
++  .rc { font-size: 12px; color: #8a8f98; margin-top: 4px; img { width: 16px; height: 16px; margin-right: 2px; vertical-align: -3px; } }
++  .hms { font-size: 12px; margin-top: 4px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; } }
++.hms-warn { color: #ff7875; } .hms-caution { color: #ffc53d; } .hms-notice { color: #95de64; }
++.hms-list { max-height: 300px; overflow-y: auto; width: 260px; .hms-item { margin-bottom: 6px; font-size: 12px; } }
++.offline { font-size: 12px; color: #bfbfbf; }
++.line { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; font-size: 13px; margin: 6px 0 2px; }
++.sub { font-size: 12px; color: #d9d9d9; margin-left: 20px; display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
++.badge { background: #722ed1; border-radius: 8px; padding: 0 6px; font-size: 11px; }
++.tag { margin: 0; font-size: 11px; line-height: 16px; }
++.progress { width: 110px; margin: 0; :deep(.ant-progress-text) { color: #d9d9d9; } }
++.services { display: flex; flex-wrap: wrap; gap: 4px 12px; font-size: 12px; margin-bottom: 8px; .service { display: inline-flex; align-items: center; } }
++.disk { margin: 6px 0; font-size: 12px;
++  .disk-head { display: flex; justify-content: space-between; gap: 6px; }
++  .path { font-size: 11px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
++  :deep(.ant-progress) { margin: 0; line-height: 1; }
++  :deep(.ant-progress-inner) { background: #434343; } }
++.stamp { margin-top: 6px; }
++.user { margin-top: 8px; }
+ </style>
+-- 
+2.47.3
+

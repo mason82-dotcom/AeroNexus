@@ -235,6 +235,7 @@ services:
       TZ: Europe/Berlin
     volumes:
       - mapping-cache:/cache       # media thumbnails (regenerated on demand if lost)
+      - ./data/status:/host-status:ro   # host status of edge/status.sh (cron) for the web status page
     ports:
       - "6790:6790"     # mapping API (web UI + compute agent)
     healthcheck:

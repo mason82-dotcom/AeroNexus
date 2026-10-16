@@ -186,6 +186,15 @@ Editing routes (mapping-tool/service/app/wpml.py, verified with Pilot 2 on RC Pr
   `POST /flight-sets/{id}/mapping-job` (RGB/visible JPGs or band TIFs). Note the path `flight-sets-summary`:
   `/flight-sets/{set_id}` of ingest.py would catch `/flight-sets/summary`.
 
+## Status page
+- Menu "Lagebild" (tsa.vue, web patch 0036) = status page: warnings, online devices (topo + OSD from the store, German
+  flight modes, eye opens the OSD panel), today (missions, uploads 24 h, flight sets with uploads in 24 h, jobs, PV),
+  system. Backend `GET /api/mapping/status` (app/status.py, build_warnings is pure + tested): probes the services from
+  the mapping container, agents from agent_seen (migration 0010, claim/heartbeat) plus job history.
+- Host data (disks, backup last-success + cron, containers, temperature) comes from `edge/status.sh` (cron every 5 min,
+  `--install-cron`) -> edge/data/status/host.json, mounted read-only into mapping. No host or data-disk mount in the
+  service; a missing/old file is a warning. A commented-out backup.sh cron line counts as disabled.
+
 ## Mission planning
 - Menu "Aufgabenplaene" (task plans) = missions (web patch 0027, missions.vue); the DJI Dock task page (task.vue) is unused.
   Backend in the mapping service (app/missions.py, migration 0004): checklist per purpose, status planned ->

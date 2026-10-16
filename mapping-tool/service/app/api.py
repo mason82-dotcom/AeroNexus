@@ -483,9 +483,17 @@ def build_router(settings: Settings, storage: Storage) -> APIRouter:
 
     # ---------------------------------------------------------------- compute agent
 
+    def seen(cur, agent_id: str, capabilities: dict | None = None) -> None:
+        """Last contact per agent (status page: compute node online)."""
+        cur.execute("INSERT INTO agent_seen (agent_id, last_seen, capabilities) VALUES (%s, UTC_TIMESTAMP(3), %s)"
+                    " ON DUPLICATE KEY UPDATE last_seen = VALUES(last_seen),"
+                    " capabilities = COALESCE(VALUES(capabilities), capabilities)",
+                    (agent_id[:64], json.dumps(capabilities) if capabilities else None))
+
     @router.post("/agent/claim", dependencies=[Depends(agent)])
     def claim(body: Claim):
         with db.transaction(settings) as cur:
+            seen(cur, body.agent_id, body.capabilities)
             requeue_expired(cur, settings)
             cur.execute("SELECT * FROM mapping_job WHERE status = 'QUEUED' ORDER BY created_at, id"
                         " LIMIT 1 FOR UPDATE SKIP LOCKED")
@@ -517,6 +525,7 @@ def build_router(settings: Settings, storage: Storage) -> APIRouter:
     def heartbeat(job_id: str, body: Heartbeat) -> dict:
         with db.transaction(settings) as cur:
             lock_active_job(cur, job_id, body.agent_id)
+            seen(cur, body.agent_id)
             cur.execute(
                 "UPDATE mapping_job SET status = 'RUNNING', progress = %s, message = %s,"
                 " lease_until = UTC_TIMESTAMP(3) + INTERVAL %s SECOND, updated_at = UTC_TIMESTAMP(3) WHERE id = %s",
