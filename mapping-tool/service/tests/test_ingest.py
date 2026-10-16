@@ -82,6 +82,15 @@ class FlightSetTest(unittest.TestCase):
 
 
 
+class RefineCategoryTest(unittest.TestCase):
+    def test_v_photo_of_a_non_thermal_drone_is_rgb(self):
+        self.assertEqual(ingest.refine_category("visible", {"model": "M3E"}), "rgb")
+        self.assertEqual(ingest.refine_category("visible", {"model": "M3T"}), "visible")
+        self.assertEqual(ingest.refine_category("visible", {"model": "M4T"}), "visible")
+        self.assertEqual(ingest.refine_category("visible", None), "visible")     # no metadata: keep
+        self.assertEqual(ingest.refine_category("thermal", {"model": "M3E"}), "thermal")
+
+
 class DroneAttributionTest(unittest.TestCase):
     """Pilot 2 attributes uploads to the drone connected at upload time; the aircraft writes its own serial."""
     XMP = (b'<x:xmpmeta xmlns:x="adobe:ns:meta/"><rdf:RDF><rdf:Description '

@@ -55,6 +55,19 @@ def classify(file_name: str, sub_file_type: int | None = None) -> tuple[str, str
     return "other", None
 
 
+# drones whose _V photo is the visible frame of a thermal shot; on any other drone _V is a plain RGB photo
+# (2026-10-16: 203 Mavic 3E photos were filed as "visible")
+THERMAL_MODELS = frozenset({"M3T", "M3TD", "M4T", "M4TD", "M30T"})
+
+
+def refine_category(category: str, meta: dict | None) -> str:
+    """Category from the file name, corrected by the camera model in EXIF/XMP where it tells more."""
+    model = (meta or {}).get("model")
+    if category == "visible" and model and model not in THERMAL_MODELS:
+        return "rgb"
+    return category
+
+
 def shot_info(file_name: str) -> tuple[str | None, datetime | None]:
     """(shot key, camera time) from DJI_<yyyymmddhhmmss>_<nnnn>_..."""
     m = _SHOT_RE.match(file_name)
@@ -159,6 +172,7 @@ def _prepare_file(settings, storage, row: dict) -> dict:
         try:
             out["meta"] = read_meta(settings, storage, row)
             out["meta_ok"] = True
+            out["category"] = refine_category(category, out["meta"])
             if out["captured_at"] is None and out["meta"].get("captured"):
                 out["captured_at"] = datetime.fromisoformat(out["meta"]["captured"]).replace(tzinfo=None)
         except Exception as exc:
