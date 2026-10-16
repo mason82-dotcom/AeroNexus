@@ -91,6 +91,14 @@ class RefineCategoryTest(unittest.TestCase):
         self.assertEqual(ingest.refine_category("thermal", {"model": "M3E"}), "thermal")
 
 
+class PairSqlTest(unittest.TestCase):
+    def test_pair_sql_lists_the_thermal_models_like_migration_0008(self):
+        mig = open("migrations/0008_visible_needs_thermal_pair.sql").read()
+        models = sorted(ingest.THERMAL_MODELS)
+        self.assertIn(",".join(f"'{m}'" for m in models), ingest.PAIR_SQL)
+        self.assertIn(", ".join(f"'{m}'" for m in models), mig)
+
+
 class DroneAttributionTest(unittest.TestCase):
     """Pilot 2 attributes uploads to the drone connected at upload time; the aircraft writes its own serial."""
     XMP = (b'<x:xmpmeta xmlns:x="adobe:ns:meta/"><rdf:RDF><rdf:Description '

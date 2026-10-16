@@ -217,6 +217,19 @@ def _resolve_shot(cur, row: dict, shot_key: str | None, captured: datetime | Non
     return shot_key, None
 
 
+# Non-thermal photos of thermal drones: "visible" when their shot has a thermal file, else "rgb" (Matrice 4T
+# mapping flights shoot only the wide camera). Files of one shot may arrive in any order, so this runs after
+# every ingest pass instead of per file.
+PAIR_SQL = (
+    "UPDATE media_ingest v JOIN media_meta m ON m.file_id = v.file_id"
+    " LEFT JOIN (SELECT DISTINCT workspace_id, shot_key FROM media_ingest WHERE category = 'thermal'"
+    " AND shot_key IS NOT NULL) t ON t.workspace_id = v.workspace_id AND t.shot_key = v.shot_key"
+    " SET v.category = IF(t.shot_key IS NULL, 'rgb', 'visible')"
+    " WHERE v.category IN ('visible', 'rgb') AND v.shot_key IS NOT NULL"
+    " AND JSON_UNQUOTE(JSON_EXTRACT(m.meta, '$.model')) IN (" + ",".join(f"'{m}'" for m in sorted(THERMAL_MODELS)) + ")"
+    " AND v.category <> IF(t.shot_key IS NULL, 'rgb', 'visible')")
+
+
 def _assign_set(cur, row: dict, captured: datetime) -> str:
     # Some uploads carry no drone serial (seen on multispectral TIFs and videos): match any drone then.
     drone = row["drone"] or ""
@@ -267,6 +280,11 @@ def prepare_pending(settings, storage, db, limit: int = BATCH) -> int:
                     done += 1
                     log.info("ingest: %s -> %s%s, set %s", row["file_name"], prep["category"],
                              f"/{prep['band']}" if prep["band"] else "", (set_id or "-")[:8])
+                if done:
+                    cur.execute(PAIR_SQL)
+                    if cur.rowcount:
+                        log.info("ingest: %d photos re-filed as visible/rgb by their thermal pair", cur.rowcount)
+                    conn.commit()
             finally:
                 cur.execute("SELECT RELEASE_LOCK(%s)", (LOCK_NAME,))
                 conn.commit()

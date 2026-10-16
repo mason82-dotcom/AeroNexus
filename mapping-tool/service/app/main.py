@@ -8,7 +8,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 import threading
 
-from . import config, db, evidence, ingest, mediaauth, missions
+from . import config, db, evidence, ingest, mediabrowse, mediaauth, missions
 from .api import build_router
 from .storage import Storage
 
@@ -58,6 +58,7 @@ app.include_router(mediaauth.build_router(settings))
 app.include_router(missions.build_router(settings))
 app.include_router(evidence.build_router(settings, storage))
 app.include_router(ingest.build_router(settings))
+app.include_router(mediabrowse.build_router(settings))
 
 
 @app.get("/health")

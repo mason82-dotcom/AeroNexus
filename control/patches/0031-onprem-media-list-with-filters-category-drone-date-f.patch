@@ -1,0 +1,760 @@
+From 7e2eede236125336df26e4ca6bb57f16955ce10d Mon Sep 17 00:00:00 2001
+From: RomaN <mason@rpi5.local>
+Date: Fri, 16 Oct 2026 08:43:13 +0200
+Subject: [PATCH] onprem: media list with filters (category, drone, date,
+ flight set, name), readable columns
+
+---
+ src/api/mapping.ts                    |  67 ++++++++
+ src/components/MediaPanel.vue         | 224 ++++++++++++++++----------
+ src/components/media/media-filter.ts  |  39 +++++
+ src/locales/de.ts                     |  28 ++++
+ src/pages/page-web/projects/media.vue | 118 ++++++++++++++
+ 5 files changed, 391 insertions(+), 85 deletions(-)
+ create mode 100644 src/components/media/media-filter.ts
+
+diff --git a/src/api/mapping.ts b/src/api/mapping.ts
+index a90bb08..4b6c653 100644
+--- a/src/api/mapping.ts
++++ b/src/api/mapping.ts
+@@ -227,3 +227,70 @@ export interface RoutePathInfo { waypoints: number, lanes: number, length_m: num
+ export async function copyRoute (waylineId: string, body: { name: string, polygon: [number, number][], params: RouteParams }): Promise<{ id: string, name: string, path: RoutePathInfo | null }> {
+   return (await http.post(`/api/mapping/waylines/${waylineId}/copy`, body)).data
+ }
++
++// onprem: media list with ingest information and filters (mapping service app/mediabrowse.py)
++export type MediaCategory = 'thermal' | 'visible' | 'rgb' | 'multispectral' | 'video' | 'panorama' | 'other'
++
++export interface BrowseMedia {
++  file_id: string
++  file_name: string
++  object_key: string
++  file_path: string
++  payload: string
++  is_original: boolean
++  drone: string // aircraft serial from the photo, else what Pilot 2 reported
++  pilot_drone: string
++  category: MediaCategory | null
++  band: string | null
++  flight_set_id: string | null
++  captured_at: string | null // local camera time
++  uploaded_at: string
++}
++
++export interface MediaFilter {
++  category: MediaCategory[]
++  drone: string // serial, '-' = none, '' = all
++  flight_set: string
++  date_from: string // YYYY-MM-DD
++  date_to: string
++  q: string
++}
++
++export interface MediaFacets {
++  categories: Partial<Record<MediaCategory, number>>
++  drones: { serial: string, name: string, known_device: boolean, files: number, first: string | null, last: string | null }[]
++  first: string | null
++  last: string | null
++}
++
++export interface FlightSet {
++  id: string
++  drone: string
++  kind: 'thermal' | 'multispectral' | 'rgb' | 'video' | 'mixed'
++  first_capture: string
++  last_capture: string
++  shots: number
++  files: number
++  by_category: Partial<Record<MediaCategory, number>>
++}
++
++export async function browseMedia (filter: MediaFilter, page: number, pageSize: number): Promise<{ total: number, list: BrowseMedia[] }> {
++  const params: Record<string, string | number> = { page, page_size: pageSize }
++  if (filter.category.length) params.category = filter.category.join(',')
++  for (const k of ['drone', 'flight_set', 'date_from', 'date_to', 'q'] as const) {
++    if (filter[k]) params[k] = filter[k]
++  }
++  return (await http.get('/api/mapping/media/browse', { params })).data
++}
++
++export async function getMediaFacets (): Promise<MediaFacets> {
++  return (await http.get('/api/mapping/media/facets')).data
++}
++
++export async function getFlightSets (): Promise<FlightSet[]> {
++  return (await http.get('/api/mapping/flight-sets')).data
++}
++
++export async function getFlightSet (id: string): Promise<FlightSet & { file_ids: Partial<Record<MediaCategory, string[]>> }> {
++  return (await http.get(`/api/mapping/flight-sets/${id}`)).data
++}
+diff --git a/src/components/MediaPanel.vue b/src/components/MediaPanel.vue
+index 24edcba..8739bfc 100644
+--- a/src/components/MediaPanel.vue
++++ b/src/components/MediaPanel.vue
+@@ -1,14 +1,37 @@
+ <template>
+-  <div class="header">{{ $t('Media Files') }}</div>
++  <div class="header">
++    <span>{{ $t('Media Files') }}</span>
++    <span class="count">{{ paginationProp.total }} {{ $t('files') }}</span>
++    <span v-if="activeFilters.length" class="chips">
++      <a-tag v-for="f in activeFilters" :key="f.key" closable @close="f.clear()">{{ f.label }}</a-tag>
++      <a @click="resetFilter()">{{ $t('Reset filters') }}</a>
++    </span>
++  </div>
+   <a-spin :spinning="loading" :delay="1000" :tip="$t('downloading')" size="large">
+     <div class="media-panel-wrapper">
+-      <a-table class="media-table" :columns="columns" :data-source="mediaData.data" row-key="fingerprint"
+-        :pagination="paginationProp" :scroll="{ x: '100%', y: 600 }" @change="refreshData">
+-        <template v-for="col in ['name', 'path']" #[col]="{ text }" :key="col">
+-          <a-tooltip :title="text">
+-              <a v-if="col === 'name'">{{ text }}</a>
+-              <span v-else>{{ text }}</span>
++      <a-table class="media-table" :columns="columns" :data-source="mediaData.data" row-key="file_id" size="middle"
++        :loading="listLoading" :pagination="paginationProp" :scroll="{ x: 1560, y: 'calc(100vh - 240px)' }"
++        @change="refreshData">
++        <template #name="{ record }">
++          <a-tooltip :title="record.file_name">
++            <div class="name">{{ record.file_name }}</div>
+           </a-tooltip>
++          <div v-if="record.file_path" class="dim ellipsis" :title="record.file_path">{{ record.file_path }}</div>
++        </template>
++        <template #category="{ record }">
++          <a-tag v-if="record.category" :color="CATEGORY_COLORS[record.category]">
++            {{ $t(CATEGORY_LABELS[record.category]) + (record.band && record.band !== 'F' ? ' ' + record.band : '') }}
++          </a-tag>
++        </template>
++        <template #drone="{ record }">
++          <a-tooltip :title="droneTooltip(record)">
++            <div>{{ droneName(record.drone) || record.payload?.replace(' Camera', '') || '-' }}</div>
++            <div class="dim">{{ shortSerial(record.drone) }}<template v-if="record.pilot_drone && record.pilot_drone !== record.drone"> *</template></div>
++          </a-tooltip>
++        </template>
++        <template #flightset="{ record }">
++          <a v-if="record.flight_set_id" class="mono" :title="$t('Show only this flight set')"
++             @click="mediaFilter.flight_set = record.flight_set_id.slice(0, 8)">{{ record.flight_set_id.slice(0, 8) }}</a>
+         </template>
+         <template #preview="{ record }">
+           <a-tooltip v-if="ndvi[record.object_key]?.stats?.mean !== undefined" :title="$t('Click for the NDVI preview')">
+@@ -26,7 +49,7 @@
+             <a-tag :color="lensColor(record.meta.lens)">{{ record.meta.lens }}</a-tag>
+           </a-tooltip>
+         </template>
+-        <template #captured="{ record }">{{ record.meta?.captured ? record.meta.captured.replace('T', ' ') : '' }}</template>
++        <template #captured="{ record }">{{ formatLocal(record.captured_at || record.meta?.captured) }}</template>
+         <template #camera="{ record }">
+           <template v-if="record.meta && !record.meta.error">
+             <div>{{ record.meta.model }} <span class="dim">{{ megapixel(record.meta) }}</span></div>
+@@ -43,9 +66,6 @@
+           </template>
+         </template>
+         <template #size="{ record }">{{ record.meta?.size_bytes ? (record.meta.size_bytes / 1048576).toFixed(1) + ' MB' : '' }}</template>
+-        <template #original="{ text }">
+-          {{ text }}
+-        </template>
+         <template #action="{ record }">
+           <a-tooltip :title="$t('download')">
+             <a class="fz18" @click="downloadMedia(record)"><DownloadOutlined /></a>
+@@ -89,9 +109,13 @@ import { onMounted, reactive } from 'vue'
+ import { IPage } from '../api/http/type'
+ import { ELocalStorageKey } from '../types/enums'
+ import { downloadFile } from '../utils/common'
+-import { downloadMediaFile, getMediaFiles } from '/@/api/media'
++import { downloadMediaFile } from '/@/api/media'
+ import { DownloadOutlined, VideoCameraOutlined } from '@ant-design/icons-vue'
+-import { MediaMeta, authToken, getMediaMeta, mappingBase } from '/@/api/mapping'
++import { BrowseMedia, MediaMeta, authToken, browseMedia, getMediaMeta, mappingBase } from '/@/api/mapping'
++import { computed, onUnmounted, watch } from 'vue'
++import {
++  CATEGORY_COLORS, CATEGORY_LABELS, droneName, mediaFilter, resetFilter, shortSerial
++} from '/@/components/media/media-filter'
+ import { MsPreview, getMsPreviews, msPreviewPngUrl } from '/@/api/farming'
+ 
+ // onprem: photo parameters (EXIF + DJI XMP) from the mapping service
+@@ -133,67 +157,57 @@ const workspaceId = localStorage.getItem(ELocalStorageKey.WorkspaceId)!
+ const loading = ref(false)
+ 
+ const columns = [
+-  {
+-    title: t('Preview'),
+-    width: 120,
+-    slots: { customRender: 'preview' }
+-  },
+-  {
+-    title: t('File Name'),
+-    dataIndex: 'file_name',
+-    ellipsis: true,
+-    slots: { customRender: 'name' }
+-  },
+-  // {
+-  //   title: t('FileSize'),
+-  //   dataIndex: 'size',
+-  // },
+-  {
+-    title: t('Drone'),
+-    dataIndex: 'drone'
+-  },
+-  {
+-    title: t('Camera'),
+-    width: 170,
+-    slots: { customRender: 'lens' }
+-  },
+-  {
+-    title: t('Captured'),
+-    width: 160,
+-    slots: { customRender: 'captured' }
+-  },
+-  {
+-    title: t('Model / Exposure'),
+-    width: 230,
+-    slots: { customRender: 'camera' }
+-  },
+-  {
+-    title: t('Position (GNSS, height)'),
+-    width: 200,
+-    slots: { customRender: 'position' }
+-  },
+-  {
+-    title: t('Size'),
+-    width: 80,
+-    slots: { customRender: 'size' }
+-  },
+-  {
+-    title: t('Original'),
+-    dataIndex: 'is_original',
+-    slots: { customRender: 'original' }
+-  },
+-  {
+-    title: t('Action'),
+-    slots: { customRender: 'action' }
+-  }
++  { title: t('Preview'), width: 120, fixed: 'left', slots: { customRender: 'preview' } },
++  { title: t('File Name'), width: 250, fixed: 'left', slots: { customRender: 'name' } },
++  { title: t('Category'), width: 190, slots: { customRender: 'category' } },
++  { title: t('Drone'), width: 130, slots: { customRender: 'drone' } },
++  { title: t('Camera'), width: 200, slots: { customRender: 'lens' } },
++  { title: t('Captured'), width: 150, slots: { customRender: 'captured' } },
++  { title: t('Model / Exposure'), width: 220, slots: { customRender: 'camera' } },
++  { title: t('Position (GNSS, height)'), width: 190, slots: { customRender: 'position' } },
++  { title: t('Size'), width: 80, slots: { customRender: 'size' } },
++  { title: t('Flight set'), width: 90, slots: { customRender: 'flightset' } },
++  { title: t('Action'), width: 70, fixed: 'right', slots: { customRender: 'action' } }
+ ]
++
++// onprem: dates as "15.10.2026 14:02" (camera local time, no time zone conversion)
++function formatLocal (iso: string | null | undefined): string {
++  const m = (iso || '').match(/^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})/)
++  return m ? `${m[3]}.${m[2]}.${m[1]} ${m[4]}:${m[5]}` : ''
++}
++function droneTooltip (r: BrowseMedia): string {
++  const parts = [r.drone ? `${t('Serial')}: ${r.drone}` : t('No drone serial (video)')]
++  if (r.pilot_drone && r.pilot_drone !== r.drone) {
++    parts.push(t('* Pilot 2 reported {0} (drone connected at upload time); serial taken from the photo', [r.pilot_drone]))
++  }
++  return parts.join(' \u00b7 ')
++}
++
++// active filters as removable chips in the header
++const activeFilters = computed(() => {
++  const out: { key: string, label: string, clear: () => void }[] = []
++  for (const c of mediaFilter.category) {
++    out.push({ key: 'c-' + c, label: t(CATEGORY_LABELS[c]), clear: () => { mediaFilter.category = mediaFilter.category.filter(x => x !== c) } })
++  }
++  if (mediaFilter.drone) {
++    out.push({ key: 'd', label: mediaFilter.drone === '-' ? t('without drone') : (droneName(mediaFilter.drone) || shortSerial(mediaFilter.drone)), clear: () => { mediaFilter.drone = '' } })
++  }
++  if (mediaFilter.flight_set) out.push({ key: 's', label: `${t('Flight set')} ${mediaFilter.flight_set.slice(0, 8)}`, clear: () => { mediaFilter.flight_set = '' } })
++  if (mediaFilter.date_from || mediaFilter.date_to) {
++    out.push({ key: 't', label: `${formatLocal(mediaFilter.date_from + 'T00:00').slice(0, 10)} - ${formatLocal(mediaFilter.date_to + 'T00:00').slice(0, 10)}`, clear: () => { mediaFilter.date_from = ''; mediaFilter.date_to = '' } })
++  }
++  if (mediaFilter.q) out.push({ key: 'q', label: `"${mediaFilter.q}"`, clear: () => { mediaFilter.q = '' } })
++  return out
++})
++
+ const body: IPage = {
+   page: 1,
+   total: 0,
+   page_size: 50
+ }
+ const paginationProp = reactive({
+-  pageSizeOptions: ['20', '50', '100'],
++  pageSizeOptions: ['20', '50', '100', '200'],
++  showTotal: (total: number) => `${total} ${t('files')}`,
+   showQuickJumper: true,
+   showSizeChanger: true,
+   pageSize: 50,
+@@ -203,16 +217,7 @@ const paginationProp = reactive({
+ 
+ type Pagination = TableState['pagination']
+ 
+-interface MediaFile {
+-  fingerprint: string,
+-  drone: string,
+-  payload: string,
+-  is_original: string,
+-  file_name: string,
+-  file_path: string,
+-  create_time: string,
+-  file_id: string,
+-  object_key: string,
++interface MediaFile extends BrowseMedia {
+   meta?: MediaMeta | null,
+ }
+ 
+@@ -234,20 +239,38 @@ const mediaData = reactive({
+   data: [] as MediaFile[]
+ })
+ 
++const listLoading = ref(false)
++let requestId = 0
++
+ onMounted(() => {
+   getFiles()
+ })
+ 
++// any filter change starts at page 1; typing in the search waits a moment
++let timer: ReturnType<typeof setTimeout> | undefined
++watch(() => JSON.stringify(mediaFilter), () => {
++  clearTimeout(timer)
++  timer = setTimeout(() => { body.page = 1; getFiles() }, 300)
++})
++onUnmounted(() => clearTimeout(timer))
++
+ function getFiles () {
+-  getMediaFiles(workspaceId, body).then(res => {
+-    mediaData.data = res.data.list
+-    paginationProp.total = res.data.pagination.total
+-    paginationProp.current = res.data.pagination.page
++  const id = ++requestId
++  listLoading.value = true
++  browseMedia(mediaFilter, body.page, body.page_size).then(res => {
++    if (id !== requestId) return                     // an older request answered late
++    mediaData.data = res.list
++    paginationProp.total = res.total
++    paginationProp.current = body.page
++    paginationProp.pageSize = body.page_size
+     loadNdvi(mediaData.data)
++    if (!res.list.length) return
+     getMediaMeta(mediaData.data.map((m: MediaFile) => m.file_id)).then(meta => {
++      if (id !== requestId) return
+       mediaData.data = mediaData.data.map((m: MediaFile) => ({ ...m, meta: meta[m.file_id] }))
+     }).catch(() => message.warning(t('Photo parameters not available (mapping service not reachable)')))
+-  })
++  }).catch(() => message.error(t('Media list not available (mapping service not reachable)')))
++    .finally(() => { if (id === requestId) listLoading.value = false })
+ }
+ 
+ function refreshData (page: Pagination) {
+@@ -276,7 +299,22 @@ function downloadMedia (media: MediaFile) {
+   width: 100%;
+   padding: 16px;
+   .dim {
+-    color: hsla(0, 0%, 100%, 0.55);
++    color: #8a8f98;             /* was white on the white table: exposure and height lines were invisible */
++    font-size: 12px;
++  }
++  .name {
++    font-weight: 500;
++    overflow: hidden;
++    text-overflow: ellipsis;
++    white-space: nowrap;
++  }
++  .ellipsis {
++    overflow: hidden;
++    text-overflow: ellipsis;
++    white-space: nowrap;
++  }
++  .mono {
++    font-family: ui-monospace, monospace;
+     font-size: 12px;
+   }
+   .thumb {
+@@ -340,13 +378,29 @@ function downloadMedia (media: MediaFile) {
+   color: #888;
+ }
+ .header {
++  display: flex;
++  align-items: center;
++  gap: 14px;
+   width: 100%;
+-  height: 60px;
++  min-height: 60px;
+   background: #fff;
+-  padding: 16px;
++  padding: 12px 16px;
+   font-size: 20px;
+   font-weight: bold;
+   text-align: start;
+   color: #000;
++  .count {
++    font-size: 14px;
++    font-weight: normal;
++    color: #8a8f98;
++  }
++  .chips {
++    display: flex;
++    flex-wrap: wrap;
++    align-items: center;
++    gap: 4px;
++    font-size: 13px;
++    font-weight: normal;
++  }
+ }
+ </style>
+diff --git a/src/components/media/media-filter.ts b/src/components/media/media-filter.ts
+new file mode 100644
+index 0000000..c9f060b
+--- /dev/null
++++ b/src/components/media/media-filter.ts
+@@ -0,0 +1,39 @@
++// onprem: filter state shared by the media filter panel (left) and the media table (right)
++import { reactive } from 'vue'
++import { FlightSet, MediaCategory, MediaFacets, MediaFilter, getFlightSets, getMediaFacets } from '/@/api/mapping'
++
++export const CATEGORY_LABELS: Record<MediaCategory, string> = {
++  thermal: 'Thermal', visible: 'Visible (thermal pair)', rgb: 'RGB', multispectral: 'Multispectral',
++  video: 'Video', panorama: 'Panorama', other: 'Other'
++}
++export const CATEGORY_COLORS: Record<MediaCategory, string> = {
++  thermal: 'volcano', visible: 'geekblue', rgb: 'blue', multispectral: 'purple', video: 'default', panorama: 'cyan', other: 'default'
++}
++
++export function emptyFilter (): MediaFilter {
++  return { category: [], drone: '', flight_set: '', date_from: '', date_to: '', q: '' }
++}
++
++export const mediaFilter = reactive<MediaFilter>(emptyFilter())
++
++export function resetFilter () {
++  Object.assign(mediaFilter, emptyFilter())
++}
++
++export function shortSerial (serial: string): string {
++  return serial ? '…' + serial.slice(-5) : ''
++}
++
++// filter values (categories, drones, date span) and the flight sets, loaded once per page visit
++
++export const facets = reactive<{ data: MediaFacets | null, sets: FlightSet[] }>({ data: null, sets: [] })
++
++export async function loadFacets (): Promise<void> {
++  const [f, sets] = await Promise.all([getMediaFacets(), getFlightSets()])
++  facets.data = f
++  facets.sets = sets
++}
++
++export function droneName (serial: string): string {
++  return facets.data?.drones.find(d => d.serial === serial)?.name || ''
++}
+diff --git a/src/locales/de.ts b/src/locales/de.ts
+index 9738f44..f778b48 100644
+--- a/src/locales/de.ts
++++ b/src/locales/de.ts
+@@ -2,6 +2,7 @@
+ // Keys must match t('...') / $t('...') exactly. Missing keys fall back to the original text.
+ // Generated once from the source; maintained by hand from here on.
+ export default {
++  "* Pilot 2 reported {0} (drone connected at upload time); serial taken from the photo": "* Pilot 2 meldete {0} (beim Upload verbundene Drohne); Seriennummer aus dem Foto",
+   "4g 增强": "4G-Verstärkung",
+   "abs": "abs.",
+   "Account": "Konto",
+@@ -18,6 +19,8 @@ export default {
+   "Aircraft Sn": "Fluggerät-SN",
+   "Alarm Begin | End Time": "Alarm Beginn | Ende",
+   "All": "Alle",
++  "All drones": "Alle Drohnen",
++  "All flight sets": "Alle Flugsätze",
+   "ALT": "Höhe",
+   "Altitude above sea level": "Höhe über NN",
+   "Altitude above takeoff level": "Höhe über Startpunkt",
+@@ -53,6 +56,7 @@ export default {
+   "Cancel this job? The compute node stops at its next heartbeat (up to 2 min).": "Auftrag abbrechen? Der Rechenknoten stoppt beim nächsten Heartbeat (bis zu 2 Min.).",
+   "Canceling the job failed: ": "Abbrechen fehlgeschlagen: ",
+   "Captured": "Aufgenommen",
++  "Category": "Kategorie",
+   "Cell (m)": "Raster (m)",
+   "Channel": "Kanal",
+   "Channel:": "Kanal:",
+@@ -120,6 +124,7 @@ export default {
+   "Drag corners to move them, click a small dot to add a corner, right-click a corner to delete it. The grey line is the old flight path: Pilot 2 recomputes the route from the area when the copy is opened.": "Ecken ziehen zum Verschieben, auf einen kleinen Punkt klicken fügt eine Ecke hinzu, Rechtsklick auf eine Ecke löscht sie. Die graue Linie ist die alte Flugbahn: Pilot 2 berechnet die Route beim Öffnen der Kopie neu.",
+   "drc info": "DRC-Info",
+   "Drone": "Drohne",
++  "Drone and category come from the photo itself (aircraft serial, camera model), not from what Pilot 2 reported.": "Drohne und Kategorie stammen aus dem Foto selbst (Seriennummer, Kameramodell), nicht aus der Meldung von Pilot 2.",
+   "Drone Battery Level": "Akku Drohne",
+   "Drone Flight Control": "Flugsteuerung",
+   "Drone in dock": "Drohne im Dock",
+@@ -150,7 +155,10 @@ export default {
+   "File Name": "Dateiname",
+   "File Size": "Dateigröße",
+   "Filed to verify the license. Please check license whether the license is correct, or apply again.": "Lizenzprüfung fehlgeschlagen. Bitte die Lizenz prüfen oder neu beantragen.",
++  "files": "Dateien",
+   "FileSize": "Dateigröße",
++  "Filter": "Filter",
++  "Filter values not available (mapping service not reachable)": "Filterwerte nicht verfügbar (Mapping-Dienst nicht erreichbar)",
+   "Firmware Version": "Firmware-Version",
+   "Fixed": "Fest",
+   "Flight Area": "Flugzonen",
+@@ -159,6 +167,7 @@ export default {
+   "Flight Route": "Flugroute",
+   "Flight Route Library": "Flugrouten",
+   "Flight Route Name": "Flugroute",
++  "Flight set": "Flugsatz",
+   "Fly to": "Anfliegen",
+   "Format error. Please select zip file.": "Falsches Format. Bitte eine ZIP-Datei wählen.",
+   "fps": "fps",
+@@ -240,11 +249,13 @@ export default {
+   "Media File Remain Upload": "Noch hochzuladende Mediendateien",
+   "Media File Upload": "Medien-Upload",
+   "Media Files": "Mediendateien",
++  "Media list not available (mapping service not reachable)": "Medienliste nicht verfügbar (Mapping-Dienst nicht erreichbar)",
+   "median": "Median",
+   "Median": "Median",
+   "Method": "Methode",
+   "Min. area (m2)": "Mindestfläche (m²)",
+   "Mine": "Eigene",
++  "mixed": "gemischt",
+   "Model": "Modell",
+   "Model / Exposure": "Modell / Belichtung",
+   "Modification canceled": "Änderung verworfen",
+@@ -253,6 +264,7 @@ export default {
+   "Mqtt Username": "MQTT-Benutzer",
+   "ms": "ms",
+   "multispectral": "Multispektral",
++  "Multispectral": "Multispektral",
+   "Multispectral (M3M)": "Multispektral (M3M)",
+   "Multispectral bands": "Multispektral-Bänder",
+   "My Username": "Mein Benutzername",
+@@ -266,6 +278,7 @@ export default {
+   "New mapping job": "Neuer Kartierungsauftrag",
+   "No": "Nein",
+   "No Drone": "Keine Drohne",
++  "No drone serial (video)": "Keine Seriennummer (Video)",
+   "No jobs. Processing runs on the x64 compute node.": "Keine Aufträge. Gerechnet wird auf dem x64-Rechenknoten.",
+   "No media files": "Keine Mediendateien",
+   "No reflectance panel: compare values within this flight only": "Ohne Kalibrierpanel: Werte nur innerhalb dieses Fluges vergleichen",
+@@ -280,10 +293,12 @@ export default {
+   "Open 3rd Party APP": "Drittanbieter-App öffnen",
+   "Original": "Original",
+   "Original Photo": "Originalfoto",
++  "Other": "Sonstige",
+   "Overlap": "Überlappung",
+   "Overlap across (%)": "Überlappung quer (%)",
+   "Overlap along (%)": "Überlappung längs (%)",
+   "Packet Loss Rate:": "Paketverlust:",
++  "Panorama": "Panorama",
+   "Param:": "Parameter:",
+   "Password": "Passwort",
+   "Path for uploading media resources in dual-controller mode": "Upload-Pfad für Medien im Dual-Controller-Betrieb",
+@@ -325,6 +340,7 @@ export default {
+   "Release Date": "Veröffentlicht",
+   "Release Note": "Versionshinweise",
+   "Remote Control Sn": "Fernsteuerung-SN",
++  "Reset filters": "Filter zurücksetzen",
+   "reset mode:": "Rücksetzmodus:",
+   "Result layers": "Ergebnis-Layer",
+   "Resume": "Fortsetzen",
+@@ -335,6 +351,8 @@ export default {
+   "Return to Home": "Rückkehr zum Startpunkt",
+   "Return-to-Home Altitude(m):": "Rückkehrhöhe (m):",
+   "Return-to-Home Mode:": "Rückkehrmodus:",
++  "RGB": "RGB",
++  "rgb": "RGB",
+   "RGB only": "Nur RGB",
+   "Route cannot be shown: mapping service not reachable or file unreadable": "Route kann nicht angezeigt werden: Mapping-Dienst nicht erreichbar oder Datei unlesbar",
+   "RTH Altitude Relative to Dock (m)": "Rückkehrhöhe über Dock (m)",
+@@ -352,6 +370,7 @@ export default {
+   "Saved as new route \"{0}\". Pilot 2 syncs it into its library.": "Als neue Route \"{0}\" gespeichert. Pilot 2 übernimmt sie in seine Bibliothek.",
+   "Saving failed: ": "Speichern fehlgeschlagen: ",
+   "Saving rates failed: ": "Speichern der Mengen fehlgeschlagen: ",
++  "Search file name": "Dateiname suchen",
+   "Select Camera": "Kamera wählen",
+   "Select Clarity": "Qualität wählen",
+   "Select Device": "Gerät wählen",
+@@ -361,12 +380,14 @@ export default {
+   "Select Mode": "Modus wählen",
+   "Select Route": "Route wählen",
+   "Select Video Publish Mode:": "Veröffentlichungsmodus:",
++  "Serial": "Seriennummer",
+   "Serial Number": "Seriennummer",
+   "Set the clarity to ": "Qualität gesetzt auf ",
+   "Settings": "Einstellungen",
+   "Shapefile": "Shapefile",
+   "Shot": "Aufnahme",
+   "Show on map / edit": "Auf Karte zeigen / bearbeiten",
++  "Show only this flight set": "Nur diesen Flugsatz zeigen",
+   "Signal strength": "Signalstärke",
+   "Size": "Größe",
+   "Smaller patches are merged into their surroundings": "Kleinere Flächen werden der Umgebung zugeschlagen",
+@@ -413,6 +434,8 @@ export default {
+   "The path of the polygon cannot be crossed.": "Die Polygonkanten dürfen sich nicht kreuzen.",
+   "The radius must be greater than {0} m.": "Der Radius muss größer als {0} m sein.",
+   "The total number of times the dock has performed missions.": "Anzahl der vom Dock ausgeführten Einsätze.",
++  "Thermal": "Wärmebild",
++  "thermal": "Wärmebild",
+   "Time": "Zeit",
+   "Time (UTC)": "Zeit (UTC)",
+   "Timed": "Geplant",
+@@ -425,6 +448,7 @@ export default {
+   "Tsa": "Lagebild",
+   "Type": "Typ",
+   "uninstall": "deinstallieren",
++  "unknown": "unbekannt",
+   "unpublish live": "Livestream beendet",
+   "Update at {0}": "Aktualisiert {0}",
+   "Update Clarity": "Qualität ändern",
+@@ -438,7 +462,10 @@ export default {
+   "Username": "Benutzername",
+   "valid pixels": "gültige Pixel",
+   "Vertical Speed": "Vertikalgeschwindigkeit",
++  "Video": "Video",
++  "video": "Video",
+   "Video Bit Rate:": "Video-Bitrate:",
++  "Visible (thermal pair)": "Sichtbar (zum Wärmebild)",
+   "Waiting to upload": "Wartet auf Upload",
+   "waring: not select live para!!!": "Hinweis: Keine Stream-Parameter gewählt.",
+   "Wayline file deleted": "Flugroute gelöscht",
+@@ -447,6 +474,7 @@ export default {
+   "WEBRTC": "WebRTC",
+   "When enabled, photos and videos will be automatically uploaded to this server": "Wenn aktiviert, werden Fotos und Videos automatisch auf diesen Server hochgeladen",
+   "Wind Speed": "Windgeschwindigkeit",
++  "without drone": "ohne Drohne",
+   "Working Current": "Betriebsstrom",
+   "Working Voltage": "Betriebsspannung",
+   "Workspace": "Arbeitsbereich",
+diff --git a/src/pages/page-web/projects/media.vue b/src/pages/page-web/projects/media.vue
+index 6995bcd..552e957 100644
+--- a/src/pages/page-web/projects/media.vue
++++ b/src/pages/page-web/projects/media.vue
+@@ -1,10 +1,128 @@
+ <template>
+   <div class="project-media-wrapper">
++    <div class="title">{{ $t('Filter') }}</div>
++    <div class="section">
++      <a-input-search v-model:value="mediaFilter.q" :placeholder="$t('Search file name')" allow-clear />
++    </div>
++    <div class="section">
++      <div class="label">{{ $t('Category') }}</div>
++      <a-checkbox-group v-model:value="mediaFilter.category" class="cats">
++        <a-checkbox v-for="c in categories" :key="c" :value="c">
++          {{ $t(CATEGORY_LABELS[c]) }} <span class="n">{{ facets.data?.categories[c] }}</span>
++        </a-checkbox>
++      </a-checkbox-group>
++    </div>
++    <div class="section">
++      <div class="label">{{ $t('Drone') }}</div>
++      <a-select v-model:value="mediaFilter.drone" class="full" :options="droneOptions" />
++    </div>
++    <div class="section">
++      <div class="label">{{ $t('Captured') }}</div>
++      <a-range-picker class="full" :value="range" format="DD.MM.YYYY" :allow-clear="true" @change="onRange" />
++    </div>
++    <div class="section">
++      <div class="label">{{ $t('Flight set') }}</div>
++      <a-select v-model:value="mediaFilter.flight_set" class="full" show-search :options="setOptions"
++                :filter-option="filterSet" :dropdown-match-select-width="false" />
++    </div>
++    <a-button v-if="active" block ghost @click="resetFilter()">{{ $t('Reset filters') }}</a-button>
++    <p class="hint">{{ $t('Drone and category come from the photo itself (aircraft serial, camera model), not from what Pilot 2 reported.') }}</p>
+   </div>
+ </template>
+ 
+ <script lang="ts" setup>
++// onprem: media filters (left column); the table on the right reacts to the shared mediaFilter
++import moment, { Moment } from 'moment'
++import { computed, onMounted } from 'vue'
++import { useRoute } from 'vue-router'
++import { message } from 'ant-design-vue'
++import { t } from '/@/locales'
++import { MediaCategory } from '/@/api/mapping'
++import {
++  CATEGORY_LABELS, emptyFilter, facets, loadFacets, mediaFilter, resetFilter, shortSerial
++} from '/@/components/media/media-filter'
++
++const route = useRoute()
++const categories = computed(() => (Object.keys(CATEGORY_LABELS) as MediaCategory[])
++  .filter(c => facets.data?.categories[c] || mediaFilter.category.includes(c)))
++
++const droneOptions = computed(() => [
++  { value: '', label: t('All drones') },
++  ...(facets.data?.drones || []).map(d => ({
++    value: d.serial || '-',
++    label: d.serial ? `${d.name || t('unknown')} ${shortSerial(d.serial)} (${d.files})` : `${t('without drone')} (${d.files})`
++  }))
++])
++
++function setLabel (s: typeof facets.sets[number]): string {
++  const day = s.first_capture.slice(0, 10).split('-').reverse().join('.')
++  const name = facets.data?.drones.find(d => d.serial === s.drone)?.name || shortSerial(s.drone) || '-'
++  return `${day} ${s.first_capture.slice(11, 16)} · ${t(s.kind)} · ${name} · ${s.files} ${t('files')}`
++}
++const setOptions = computed(() => [
++  { value: '', label: t('All flight sets') },
++  ...facets.sets.map(s => ({ value: s.id.slice(0, 8), label: setLabel(s) }))
++])
++function filterSet (input: string, option: { label: string }) {
++  return option.label.toLowerCase().includes(input.toLowerCase())
++}
++
++const range = computed(() => mediaFilter.date_from && mediaFilter.date_to
++  ? [moment(mediaFilter.date_from), moment(mediaFilter.date_to)] : [])
++function onRange (dates: Moment[] | null) {
++  mediaFilter.date_from = dates && dates[0] ? dates[0].format('YYYY-MM-DD') : ''
++  mediaFilter.date_to = dates && dates[1] ? dates[1].format('YYYY-MM-DD') : ''
++}
++
++const active = computed(() => JSON.stringify(mediaFilter) !== JSON.stringify(emptyFilter()))
++
++onMounted(() => {
++  // deep links from the flight set page: /media?set=<id prefix>&category=thermal
++  const q = route.query
++  if (typeof q.set === 'string') { resetFilter(); mediaFilter.flight_set = q.set.slice(0, 8) }
++  if (typeof q.category === 'string') {
++    mediaFilter.category = q.category.split(',').filter(c => c in CATEGORY_LABELS) as MediaCategory[]
++  }
++  if (!facets.data) loadFacets().catch(() => message.warning(t('Filter values not available (mapping service not reachable)')))
++})
+ </script>
+ 
+ <style lang="scss" scoped>
++.project-media-wrapper {
++  padding: 14px 12px;
++  .title {
++    font-size: 15px;
++    font-weight: 600;
++    margin-bottom: 10px;
++  }
++  .section {
++    margin-bottom: 14px;
++  }
++  .label {
++    font-size: 12px;
++    color: hsla(0, 0%, 100%, 0.6);
++    margin-bottom: 4px;
++  }
++  .full {
++    width: 100%;
++  }
++  .cats {
++    display: flex;
++    flex-direction: column;
++    gap: 4px;
++    :deep(.ant-checkbox-wrapper) {
++      color: #fff;
++      margin-left: 0;
++    }
++    .n {
++      color: hsla(0, 0%, 100%, 0.5);
++      font-size: 12px;
++    }
++  }
++  .hint {
++    margin-top: 14px;
++    font-size: 12px;
++    color: hsla(0, 0%, 100%, 0.5);
++  }
++}
+ </style>
+-- 
+2.47.3
+
