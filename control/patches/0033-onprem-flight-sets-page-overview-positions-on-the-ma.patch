@@ -1,0 +1,537 @@
+From 7fcb294eec1856e1908dfaf59ae76c6c4faedce2 Mon Sep 17 00:00:00 2001
+From: RomaN <mason@rpi5.local>
+Date: Fri, 16 Oct 2026 09:00:04 +0200
+Subject: [PATCH] onprem: flight sets page (overview, positions on the map,
+ mapping job / PV inspection / NDVI / media in one click)
+
+---
+ src/api/mapping.ts                          |  30 +++
+ src/components/common/sidebar.vue           |   1 +
+ src/locales/de.ts                           |  29 +++
+ src/pages/page-web/projects/flight-sets.vue | 268 ++++++++++++++++++++
+ src/router/index.ts                         |   5 +
+ src/types/enums.ts                          |   1 +
+ 6 files changed, 334 insertions(+)
+ create mode 100644 src/pages/page-web/projects/flight-sets.vue
+
+diff --git a/src/api/mapping.ts b/src/api/mapping.ts
+index 4b6c653..9b992d8 100644
+--- a/src/api/mapping.ts
++++ b/src/api/mapping.ts
+@@ -294,3 +294,33 @@ export async function getFlightSets (): Promise<FlightSet[]> {
+ export async function getFlightSet (id: string): Promise<FlightSet & { file_ids: Partial<Record<MediaCategory, string[]>> }> {
+   return (await http.get(`/api/mapping/flight-sets/${id}`)).data
+ }
++
++// onprem: flight sets with statistics (mapping service app/mediabrowse.py)
++export type FlightClass = 'mapping' | 'oblique' | 'flight' | 'ground' | 'unknown'
++
++export interface FlightSetSummary extends FlightSet {
++  drone_name: string
++  models: string[]
++  minutes: number
++  class: FlightClass
++  ppk: boolean
++  samples: string[]
++  rel_alt_median: number | null
++  rel_alt_max: number | null
++  nadir_share: number | null
++  rtk_share: number | null
++  center: [number, number] | null
++  bbox: [number, number, number, number] | null // s, w, n, e
++}
++
++export async function getFlightSetSummary (): Promise<FlightSetSummary[]> {
++  return (await http.get('/api/mapping/flight-sets-summary')).data
++}
++
++export async function getFlightSetPositions (id: string): Promise<{ points: [number, number, string, number | null][], total: number }> {
++  return (await http.get(`/api/mapping/flight-sets/${id}/positions`)).data
++}
++
++export async function createFlightSetJob (id: string, body: { name: string, profile: MappingProfile }): Promise<{ id: string, image_count: number }> {
++  return (await http.post(`/api/mapping/flight-sets/${id}/mapping-job`, body)).data
++}
+diff --git a/src/components/common/sidebar.vue b/src/components/common/sidebar.vue
+index 2afba97..7ff056f 100644
+--- a/src/components/common/sidebar.vue
++++ b/src/components/common/sidebar.vue
+@@ -58,6 +58,7 @@ export default defineComponent({
+       { key: 1, label: t('Livestream'), path: '/' + ERouterName.LIVESTREAM, icon: 'VideoCameraOutlined' },
+       { key: 2, label: t('Annotations'), path: '/' + ERouterName.LAYER, icon: 'EnvironmentOutlined' },
+       { key: 3, label: t('Media Files'), path: '/' + ERouterName.MEDIA, icon: 'PictureOutlined' },
++      { key: 31, label: t('Flight sets'), path: '/' + ERouterName.FLIGHT_SETS, icon: 'ApartmentOutlined' },
+       { key: 4, label: t('Flight Route Library'), path: '/' + ERouterName.WAYLINE, icon: 'NodeIndexOutlined' },
+       { key: 5, label: t('Task Plan Library'), path: '/' + ERouterName.TASK, icon: 'CalendarOutlined' },
+       { key: 6, label: t('Flight Area'), path: '/' + ERouterName.FLIGHT_AREA, icon: 'GroupOutlined' },
+diff --git a/src/locales/de.ts b/src/locales/de.ts
+index f74c10e..a57844b 100644
+--- a/src/locales/de.ts
++++ b/src/locales/de.ts
+@@ -152,6 +152,7 @@ export default {
+   "Farming service not reachable: ": "Farming-Dienst nicht erreichbar: ",
+   "Fast": "Schnell",
+   "fast": "Schnell",
++  "fast (orthophoto only)": "schnell (nur Orthofoto)",
+   "File": "Datei",
+   "File Name": "Dateiname",
+   "File Size": "Dateigröße",
+@@ -162,6 +163,7 @@ export default {
+   "Filter values not available (mapping service not reachable)": "Filterwerte nicht verfügbar (Mapping-Dienst nicht erreichbar)",
+   "Firmware Version": "Firmware-Version",
+   "Fixed": "Fest",
++  "Flight": "Flug",
+   "Flight Area": "Flugzonen",
+   "Flight control is changed to {0}": "Flugsteuerung liegt jetzt bei {0}",
+   "Flight Mode": "Flugmodus",
+@@ -169,6 +171,9 @@ export default {
+   "Flight Route Library": "Flugrouten",
+   "Flight Route Name": "Flugroute",
+   "Flight set": "Flugsatz",
++  "Flight sets": "Flugsätze",
++  "Flight sets not available (mapping service not reachable)": "Flugsätze nicht verfügbar (Mapping-Dienst nicht erreichbar)",
++  "Flights": "Flüge",
+   "Fly to": "Anfliegen",
+   "Format error. Please select zip file.": "Falsches Format. Bitte eine ZIP-Datei wählen.",
+   "fps": "fps",
+@@ -182,12 +187,14 @@ export default {
+   "Gimbal Reset successfully": "Gimbal zurückgesetzt",
+   "GPS": "GPS",
+   "Grid size, e.g. working width or section width": "Rasterweite, z. B. Arbeitsbreite oder Teilbreite",
++  "Ground test": "Bodentest",
+   "HD": "HD",
+   "Height": "Höhe",
+   "Height (m)": "Höhe (m)",
+   "height(m):": "Höhe (m):",
+   "High": "Hoch",
+   "high": "Hoch",
++  "high (with surface model)": "hoch (mit Oberflächenmodell)",
+   "Hms Info": "HMS-Meldungen",
+   "Hms Message": "HMS-Meldung",
+   "Horizontal Speed": "Horizontalgeschwindigkeit",
+@@ -244,6 +251,9 @@ export default {
+   "Management zones and application maps (Farming Guide)": "Zonen und Applikationskarten (Farming Guide)",
+   "Map Element": "Kartenelement",
+   "Mapping": "Kartierung",
++  "Mapping flight": "Kartierungsflug",
++  "Mapping job": "Kartierungsauftrag",
++  "Mapping job created ({0} images)": "Kartierungsauftrag angelegt ({0} Bilder)",
+   "Mapping service not reachable": "Mapping-Dienst nicht erreichbar",
+   "Margin (m)": "Rand (m)",
+   "mean": "Mittel",
+@@ -267,9 +277,11 @@ export default {
+   "ms": "ms",
+   "multispectral": "Multispektral",
+   "Multispectral": "Multispektral",
++  "multispectral (band TIFs)": "Multispektral (Band-TIFs)",
+   "Multispectral (M3M)": "Multispektral (M3M)",
+   "Multispectral bands": "Multispektral-Bänder",
+   "My Username": "Mein Benutzername",
++  "nadir": "senkrecht",
+   "Name": "Name",
+   "Name of the copy": "Name der Kopie",
+   "Name:": "Name:",
+@@ -278,10 +290,12 @@ export default {
+   "Network State": "Netzwerkstatus",
+   "New job": "Neuer Auftrag",
+   "New mapping job": "Neuer Kartierungsauftrag",
++  "New PV inspection": "Neue PV-Inspektion",
+   "No": "Nein",
+   "no daylight": "ohne Tageslicht",
+   "No Drone": "Keine Drohne",
+   "No drone serial (video)": "Keine Seriennummer (Video)",
++  "No flight sets yet": "Noch keine Flugsätze",
+   "No jobs. Processing runs on the x64 compute node.": "Keine Aufträge. Gerechnet wird auf dem x64-Rechenknoten.",
+   "No media files": "Keine Mediendateien",
+   "No reflectance panel: compare values within this flight only": "Ohne Kalibrierpanel: Werte nur innerhalb dieses Fluges vergleichen",
+@@ -289,6 +303,7 @@ export default {
+   "No synchronization": "Keine Synchronisierung",
+   "None": "Keine",
+   "Note: Obtain The Following Parameters From https://console.agora.io": "Hinweis: Die folgenden Parameter stammen aus https://console.agora.io",
++  "Oblique flight": "Schrägflug",
+   "Offline": "Offline",
+   "OK": "OK",
+   "Online": "Online",
+@@ -296,6 +311,7 @@ export default {
+   "Open 3rd Party APP": "Drittanbieter-App öffnen",
+   "Original": "Original",
+   "Original Photo": "Originalfoto",
++  "Orthomosaic": "Orthomosaik",
+   "Other": "Sonstige",
+   "Overlap": "Überlappung",
+   "Overlap across (%)": "Überlappung quer (%)",
+@@ -328,14 +344,19 @@ export default {
+   "Polygonal GEO Zone": "Polygonale Sperrzone",
+   "Polygonal Task Area": "Polygonales Einsatzgebiet",
+   "Position (GNSS, height)": "Position (GNSS, Höhe)",
++  "Positions not available": "Aufnahmepunkte nicht verfügbar",
++  "positions on the map": "Aufnahmepunkte auf der Karte",
++  "PPK raw data available: edge/ppk.sh {0} <base station folder>": "PPK-Rohdaten vorhanden: edge/ppk.sh {0} <Ordner mit Basisdaten>",
+   "Preview": "Vorschau",
+   "Preview Photo": "Vorschaubild",
+   "Product, e.g. KAS 27": "Produkt, z. B. KAS 27",
+   "Profile": "Profil",
++  "PV inspection": "PV-Inspektion",
+   "Quick look without orthomosaic: reflectance-calibrated, bands aligned, lens distortion not removed.": "Schnellansicht ohne Orthomosaik: auf Reflexion kalibriert, Bänder überlagert, Objektivverzeichnung nicht entfernt.",
+   "Rainfall": "Niederschlag",
+   "Rates saved": "Mengen gespeichert",
+   "RC Battery Level": "Akku Fernsteuerung",
++  "Refresh": "Aktualisieren",
+   "Refresh Live Capacity": "Kameraliste aktualisieren",
+   "rel": "rel.",
+   "relative": "relativ",
+@@ -389,6 +410,8 @@ export default {
+   "Settings": "Einstellungen",
+   "Shapefile": "Shapefile",
+   "Shot": "Aufnahme",
++  "shots": "Aufnahmen",
++  "Show media": "Medien anzeigen",
+   "Show on map / edit": "Auf Karte zeigen / bearbeiten",
+   "Show only this flight set": "Nur diesen Flugsatz zeigen",
+   "Signal strength": "Signalstärke",
+@@ -425,12 +448,14 @@ export default {
+   "Take off successfully": "Gestartet",
+   "Take Photo": "Foto aufnehmen",
+   "Take Photo successfully": "Foto aufgenommen",
++  "Taken on the ground (0 m, camera level): not suitable for mapping.": "Am Boden aufgenommen (0 m, Kamera waagerecht): nicht für Kartierung geeignet.",
+   "Taken without daylight: the sunlight sensor measured almost nothing, the index values are not meaningful.": "Ohne Tageslicht aufgenommen: Der Sonnenlicht-Sensor hat kaum etwas gemessen, die Indexwerte sind nicht aussagekräftig.",
+   "Task canceled": "Abgebrochen",
+   "Task completed": "Abgeschlossen",
+   "Task failed": "Fehlgeschlagen",
+   "Task Plan Library": "Aufgabenpläne",
+   "terrain follow": "Geländefolge",
++  "Tests": "Tests",
+   "The devices are synchronizing...": "Die Geräte werden synchronisiert …",
+   "The dock is synchronizing.": "Das Dock synchronisiert gerade.",
+   "The license verification is successful.": "Lizenz erfolgreich geprüft.",
+@@ -453,6 +478,7 @@ export default {
+   "Type": "Typ",
+   "uninstall": "deinstallieren",
+   "unknown": "unbekannt",
++  "unknown drone": "unbekannte Drohne",
+   "unpublish live": "Livestream beendet",
+   "Update at {0}": "Aktualisiert {0}",
+   "Update Clarity": "Qualität ändern",
+@@ -479,6 +505,7 @@ export default {
+   "When enabled, photos and videos will be automatically uploaded to this server": "Wenn aktiviert, werden Fotos und Videos automatisch auf diesen Server hochgeladen",
+   "Wind Speed": "Windgeschwindigkeit",
+   "without drone": "ohne Drohne",
++  "Without PPK positions (for PPK use edge/ppk.sh on the server).": "Ohne PPK-Positionen (für PPK edge/ppk.sh auf dem Server verwenden).",
+   "Working Current": "Betriebsstrom",
+   "Working Voltage": "Betriebsspannung",
+   "Workspace": "Arbeitsbereich",
+@@ -496,7 +523,9 @@ export default {
+   "{0} corners": "{0} Ecken",
+   "{0} expired lease(s)": "{0} abgelaufene Lease(s)",
+   "{0} images": "{0} Bilder",
++  "{0} photos of this flight set; the job waits until a compute node picks it up.": "{0} Fotos dieses Flugsatzes; der Auftrag wartet, bis ein Rechenknoten ihn abholt.",
+   "{0} routes are shown only. Area routes (mapping2d) can be edited here; edit this route in Pilot 2.": "{0}-Routen werden nur angezeigt. Hier lassen sich Flächenrouten (mapping2d) bearbeiten; diese Route bitte in Pilot 2 bearbeiten.",
++  "{0} thermal images with the default parameters (emissivity 0.85, reflected temperature 23 °C, minimum difference 3 K). Details can be changed on the Photovoltaics page.": "{0} Wärmebilder mit den Standardwerten (Emissionsgrad 0,85, reflektierte Temperatur 23 °C, Mindestdifferenz 3 K). Einzelheiten lassen sich auf der Photovoltaik-Seite anpassen.",
+   "{0} uploaded successfully": "{0} erfolgreich hochgeladen",
+   "{0} waypoints computed by Pilot 2": "{0} Wegpunkte (von Pilot 2 berechnet)",
+   "{0} zones": "{0} Zonen",
+diff --git a/src/pages/page-web/projects/flight-sets.vue b/src/pages/page-web/projects/flight-sets.vue
+new file mode 100644
+index 0000000..05a2c09
+--- /dev/null
++++ b/src/pages/page-web/projects/flight-sets.vue
+@@ -0,0 +1,268 @@
++<template>
++  <div class="flight-sets">
++    <div class="head">
++      <span class="title">{{ $t('Flight sets') }}</span>
++      <a-tooltip :title="$t('Refresh')"><ReloadOutlined class="reload" :spin="loading" @click="refresh" /></a-tooltip>
++    </div>
++    <a-radio-group v-model:value="view" size="small" button-style="solid" class="views">
++      <a-radio-button value="flights">{{ $t('Flights') }} {{ counts.flights }}</a-radio-button>
++      <a-radio-button value="tests">{{ $t('Tests') }} {{ counts.tests }}</a-radio-button>
++      <a-radio-button value="all">{{ $t('All') }} {{ sets.length }}</a-radio-button>
++    </a-radio-group>
++    <div v-if="!loading && !shown.length" class="empty">{{ $t('No flight sets yet') }}</div>
++    <div v-for="s in shown" :key="s.id" class="card" :class="{ selected: selected?.id === s.id }" @click="select(s)">
++      <div class="row1">
++        <span class="when">{{ formatDay(s.first_capture) }}</span>
++        <span class="dim">{{ s.minutes >= 1 ? Math.round(s.minutes) + ' min' : '' }}</span>
++        <span class="grow"></span>
++        <a-tag :color="classColor[s.class]">{{ $t(classLabel[s.class]) }}</a-tag>
++      </div>
++      <div class="row2">
++        {{ s.drone_name || $t('unknown drone') }}
++        <span class="dim">{{ s.drone ? '…' + s.drone.slice(-5) : '' }}</span>
++        <a-tag class="kind" :color="kindColor[s.kind]">{{ $t(kindLabel[s.kind]) }}</a-tag>
++        <a-tooltip v-if="s.ppk" :title="$t('PPK raw data available: edge/ppk.sh {0} <base station folder>', [s.id.slice(0, 8)])">
++          <a-tag color="gold">PPK</a-tag>
++        </a-tooltip>
++      </div>
++      <div class="stats">
++        {{ s.shots }} {{ $t('shots') }} &#183; {{ s.files }} {{ $t('files') }}
++        <template v-if="s.class !== 'ground' && s.rel_alt_median !== null"> &#183; {{ Math.round(s.rel_alt_median) }} m</template>
++        <template v-if="s.nadir_share"> &#183; {{ Math.round(s.nadir_share * 100) }} % {{ $t('nadir') }}</template>
++      </div>
++      <div v-if="s.samples.length" class="samples">
++        <img v-for="f in s.samples" :key="f" :src="thumbnailUrl(f)" loading="lazy" alt="" />
++      </div>
++      <div v-if="selected?.id === s.id" class="actions" @click.stop>
++        <a-button size="small" @click="openMedia(s)">{{ $t('Show media') }}</a-button>
++        <a-button v-if="canMap(s)" size="small" type="primary" @click="openJob(s)">{{ $t('Mapping job') }}</a-button>
++        <a-button v-if="s.by_category.thermal" size="small" @click="openPv(s)">{{ $t('PV inspection') }}</a-button>
++        <a-button v-if="s.by_category.multispectral" size="small" @click="openMedia(s, 'multispectral')">NDVI</a-button>
++        <div v-if="s.class === 'ground'" class="note">{{ $t('Taken on the ground (0 m, camera level): not suitable for mapping.') }}</div>
++        <div v-if="positions.total" class="note">{{ positions.total }} {{ $t('positions on the map') }}</div>
++      </div>
++    </div>
++
++    <a-modal v-model:visible="job.visible" :title="$t('New mapping job')" :confirm-loading="job.busy" @ok="createJob">
++      <a-form layout="vertical">
++        <a-form-item :label="$t('Name')"><a-input v-model:value="job.name" /></a-form-item>
++        <a-form-item :label="$t('Profile')">
++          <a-select v-model:value="job.profile" :options="profileOptions" />
++        </a-form-item>
++      </a-form>
++      <p class="modal-note">{{ jobNote }}</p>
++    </a-modal>
++
++    <a-modal v-model:visible="pv.visible" :title="$t('New PV inspection')" :confirm-loading="pv.busy" @ok="createPv">
++      <a-form layout="vertical">
++        <a-form-item :label="$t('Name')"><a-input v-model:value="pv.name" /></a-form-item>
++      </a-form>
++      <p class="modal-note">{{ $t('{0} thermal images with the default parameters (emissivity 0.85, reflected temperature 23 °C, minimum difference 3 K). Details can be changed on the Photovoltaics page.', [pv.count]) }}</p>
++    </a-modal>
++  </div>
++</template>
++
++<script lang="ts" setup>
++// onprem: flight sets (ingest of the mapping service): overview, positions on the map, one-click actions
++import L from 'leaflet'
++import { computed, onMounted, onUnmounted, reactive, ref } from 'vue'
++import { useRouter } from 'vue-router'
++import { message } from 'ant-design-vue'
++import { ReloadOutlined } from '@ant-design/icons-vue'
++import { t } from '/@/locales'
++import { getRoot } from '/@/root'
++import { ERouterName } from '/@/types'
++import {
++  FlightClass, FlightSetSummary, MappingProfile, authToken, createFlightSetJob, getFlightSet,
++  getFlightSetPositions, getFlightSetSummary, mappingBase
++} from '/@/api/mapping'
++import { createInspection } from '/@/api/pv'
++
++const router = useRouter()
++const sets = ref<FlightSetSummary[]>([])
++const loading = ref(false)
++const view = ref<'flights' | 'tests' | 'all'>('flights')
++const selected = ref<FlightSetSummary | null>(null)
++const positions = reactive({ total: 0 })
++
++const classLabel: Record<FlightClass, string> = { mapping: 'Mapping flight', oblique: 'Oblique flight', flight: 'Flight', ground: 'Ground test', unknown: 'unknown' }
++const classColor: Record<FlightClass, string> = { mapping: 'green', oblique: 'cyan', flight: 'blue', ground: 'default', unknown: 'default' }
++const kindLabel: Record<string, string> = { thermal: 'Thermal', multispectral: 'Multispectral', rgb: 'RGB', video: 'Video', mixed: 'mixed' }
++const kindColor: Record<string, string> = { thermal: 'volcano', multispectral: 'purple', rgb: 'blue', video: 'default', mixed: 'default' }
++const categoryColor: Record<string, string> = { thermal: '#e8590c', visible: '#3b6fd8', rgb: '#3b6fd8', multispectral: '#9c36b5' }
++
++const isFlight = (s: FlightSetSummary) => s.class === 'mapping' || s.class === 'oblique' || s.class === 'flight'
++const counts = computed(() => ({ flights: sets.value.filter(isFlight).length, tests: sets.value.filter(s => !isFlight(s)).length }))
++const shown = computed(() => view.value === 'all' ? sets.value : sets.value.filter(s => (view.value === 'flights') === isFlight(s)))
++
++function formatDay (iso: string): string {
++  return `${iso.slice(8, 10)}.${iso.slice(5, 7)}.${iso.slice(0, 4)} ${iso.slice(11, 16)}`
++}
++function thumbnailUrl (fileId: string): string {
++  return `${mappingBase()}/api/mapping/media/${fileId}/thumbnail.jpg?token=${encodeURIComponent(authToken())}`
++}
++function canMap (s: FlightSetSummary): boolean {
++  return s.class !== 'ground' && !!(s.by_category.rgb || s.by_category.visible || s.by_category.multispectral)
++}
++
++async function refresh () {
++  loading.value = true
++  try {
++    sets.value = await getFlightSetSummary()
++    if (!counts.value.flights) view.value = 'all'
++  } catch (e) {
++    message.error(t('Flight sets not available (mapping service not reachable)'))
++  } finally {
++    loading.value = false
++  }
++}
++
++// ---------------------------------------------------------------- map: one point per shot
++let layer: L.LayerGroup | null = null
++function leaflet (): L.Map | undefined {
++  return getRoot()?.$map?.leaflet
++}
++function clearMap () {
++  layer?.remove()
++  layer = null
++  positions.total = 0
++}
++async function select (s: FlightSetSummary) {
++  if (selected.value?.id === s.id) return
++  selected.value = s
++  clearMap()
++  const map = leaflet()
++  if (!map) return
++  try {
++    const res = await getFlightSetPositions(s.id)
++    if (selected.value?.id !== s.id) return
++    positions.total = res.total
++    layer = L.layerGroup(res.points.map(([lat, lon, cat, h]) => L.circleMarker([lat, lon], {
++      radius: 3, weight: 0, fillOpacity: 0.85, fillColor: categoryColor[cat] || '#666'
++    }).bindTooltip(`${t(kindLabel[cat] || cat)}${h !== null ? ' · ' + h + ' m' : ''}`))).addTo(map)
++    if (s.bbox) {
++      map.fitBounds(L.latLngBounds([s.bbox[0], s.bbox[1]], [s.bbox[2], s.bbox[3]]), { padding: [40, 40], maxZoom: 19 })
++    }
++  } catch (e) {
++    message.warning(t('Positions not available'))
++  }
++}
++onUnmounted(clearMap)
++
++// ---------------------------------------------------------------- actions
++function openMedia (s: FlightSetSummary, category?: string) {
++  router.push({ path: '/' + ERouterName.MEDIA, query: { set: s.id.slice(0, 8), ...(category ? { category } : {}) } })
++}
++
++const job = reactive({ visible: false, busy: false, set: null as FlightSetSummary | null, name: '', profile: 'standard' as MappingProfile })
++const profileOptions = computed(() => [
++  { value: 'fast', label: t('fast (orthophoto only)') },
++  { value: 'standard', label: t('standard') },
++  { value: 'high', label: t('high (with surface model)') },
++  ...(job.set?.by_category.multispectral ? [{ value: 'multispectral', label: t('multispectral (band TIFs)') }] : [])
++])
++const jobNote = computed(() => {
++  const s = job.set
++  if (!s) return ''
++  const n = job.profile === 'multispectral' ? (s.by_category.multispectral || 0) : (s.by_category.rgb || 0) + (s.by_category.visible || 0)
++  const ppk = s.ppk ? ' ' + t('Without PPK positions (for PPK use edge/ppk.sh on the server).') : ''
++  return t('{0} photos of this flight set; the job waits until a compute node picks it up.', [n]) + ppk
++})
++function openJob (s: FlightSetSummary) {
++  job.set = s
++  job.name = `${t('Orthomosaic')} ${formatDay(s.first_capture).slice(0, 10)} (${s.drone_name || '?'})`
++  job.profile = s.kind === 'multispectral' ? 'multispectral' : 'standard'
++  job.visible = true
++}
++async function createJob () {
++  if (!job.set) return
++  job.busy = true
++  try {
++    const res = await createFlightSetJob(job.set.id, { name: job.name, profile: job.profile })
++    message.success(t('Mapping job created ({0} images)', [res.image_count]))
++    job.visible = false
++  } catch (e: any) {
++    message.error(t('Creating the job failed: ') + (e?.response?.data?.detail || e?.message || ''))
++  } finally {
++    job.busy = false
++  }
++}
++
++const pv = reactive({ visible: false, busy: false, set: null as FlightSetSummary | null, name: '', count: 0 })
++function openPv (s: FlightSetSummary) {
++  pv.set = s
++  pv.count = s.by_category.thermal || 0
++  pv.name = `${t('PV inspection')} ${formatDay(s.first_capture).slice(0, 10)} (${s.drone_name || '?'})`
++  pv.visible = true
++}
++async function createPv () {
++  if (!pv.set) return
++  pv.busy = true
++  try {
++    const detail = await getFlightSet(pv.set.id)
++    const ids = detail.file_ids.thermal || []
++    await createInspection({
++      name: pv.name, file_ids: ids, merge_m: 1.0,
++      thermal: { emissivity: 0.85, reflected_temp: 23, humidity: 70 },
++      detect: { min_delta: 3, class1: 3, class2: 10, class3: 20 }
++    })
++    message.success(t('Inspection queued'))
++    pv.visible = false
++    router.push('/' + ERouterName.PHOTOVOLTAIK)
++  } catch (e: any) {
++    message.error(t('Starting the inspection failed: ') + (e?.response?.data?.detail || e?.message || ''))
++  } finally {
++    pv.busy = false
++  }
++}
++
++onMounted(refresh)
++</script>
++
++<style lang="scss" scoped>
++.flight-sets {
++  padding: 12px 10px 24px;
++  .head {
++    display: flex;
++    align-items: center;
++    justify-content: space-between;
++    margin-bottom: 10px;
++    .title { font-size: 15px; font-weight: 600; }
++    .reload { cursor: pointer; color: #1890ff; }
++  }
++  .views { margin-bottom: 10px; }
++  .empty { color: hsla(0, 0%, 100%, 0.5); padding: 20px 0; }
++  .card {
++    background: #2d2d2d;
++    border: 1px solid transparent;
++    border-radius: 6px;
++    padding: 8px 10px;
++    margin-bottom: 8px;
++    cursor: pointer;
++    &:hover { border-color: #444; }
++    &.selected { border-color: #1890ff; }
++  }
++  .row1, .row2 { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
++  .row1 .when { font-weight: 600; }
++  .row2 { margin-top: 2px; font-size: 13px; }
++  .grow { flex: 1; }
++  .kind { margin-left: 2px; }
++  .dim { color: hsla(0, 0%, 100%, 0.5); font-size: 12px; }
++  .stats { margin-top: 4px; font-size: 12px; color: hsla(0, 0%, 100%, 0.7); }
++  .samples {
++    display: flex;
++    gap: 4px;
++    margin-top: 6px;
++    img { width: 58px; height: 44px; object-fit: cover; border-radius: 2px; background: #1a1a1a; }
++  }
++  .actions {
++    display: flex;
++    flex-wrap: wrap;
++    gap: 6px;
++    margin-top: 8px;
++    .note { width: 100%; font-size: 12px; color: hsla(0, 0%, 100%, 0.55); }
++  }
++  :deep(.ant-tag) { margin-right: 0; }
++}
++.modal-note { color: #888; font-size: 13px; }
++</style>
+diff --git a/src/router/index.ts b/src/router/index.ts
+index 6e9be4f..eadae52 100644
+--- a/src/router/index.ts
++++ b/src/router/index.ts
+@@ -110,6 +110,11 @@ const routes: Array<RouteRecordRaw> = [
+         name: ERouterName.FLIGHT_AREA,
+         component: () => import('/@/pages/page-web/projects/flight-area.vue')
+       },
++      {
++        path: '/' + ERouterName.FLIGHT_SETS,
++        name: ERouterName.FLIGHT_SETS,
++        component: () => import('/@/pages/page-web/projects/flight-sets.vue')
++      },
+       {
+         path: '/' + ERouterName.MAPPING,
+         name: ERouterName.MAPPING,
+diff --git a/src/types/enums.ts b/src/types/enums.ts
+index c1d7b3a..dad5cc5 100644
+--- a/src/types/enums.ts
++++ b/src/types/enums.ts
+@@ -17,6 +17,7 @@ export enum ERouterName {
+     FIRMWARES = 'firmwares',
+     FLIGHT_AREA = 'flight-area',
+     MAPPING = 'mapping',
++    FLIGHT_SETS = 'flight-sets',
+     PHOTOVOLTAIK = 'photovoltaik',
+ 
+     PILOT = 'pilot-login',
+-- 
+2.47.3
+

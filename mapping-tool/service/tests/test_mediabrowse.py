@@ -30,3 +30,21 @@ class FilterTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class FlightSetSummaryTest(unittest.TestCase):
+    def test_classification(self):
+        self.assertEqual(mediabrowse.classify_set(53.4, 0.97, 731), "mapping")
+        self.assertEqual(mediabrowse.classify_set(111.7, 0.22, 1374), "oblique")    # smart oblique
+        self.assertEqual(mediabrowse.classify_set(-0.0, 0.0, 34), "ground")
+        self.assertEqual(mediabrowse.classify_set(30.0, 1.0, 5), "flight")
+        self.assertEqual(mediabrowse.classify_set(None, None, 3), "unknown")
+
+    def test_summary_ignores_a_wrong_fix_for_the_extent(self):
+        metas = [{"rel_alt": 53.0, "gimbal_pitch": -90.0, "gps_status": "RTK", "lat": 51.16 + i * 1e-4, "lon": 10.45}
+                 for i in range(10)]
+        metas.append({"rel_alt": 0.0, "gimbal_pitch": 0.0, "gps_status": "Normal", "lat": 37.0, "lon": 10.45})
+        s = mediabrowse.set_summary(metas)
+        self.assertEqual((s["rel_alt_median"], s["nadir_share"], s["rtk_share"]), (53.0, 0.91, 0.91))
+        self.assertAlmostEqual(s["bbox"][0], 51.16)                   # the fix 1500 km away is not in the extent
+        self.assertAlmostEqual(s["bbox"][2], 51.1609)

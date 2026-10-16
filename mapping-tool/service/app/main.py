@@ -58,7 +58,7 @@ app.include_router(mediaauth.build_router(settings))
 app.include_router(missions.build_router(settings))
 app.include_router(evidence.build_router(settings, storage))
 app.include_router(ingest.build_router(settings))
-app.include_router(mediabrowse.build_router(settings))
+app.include_router(mediabrowse.build_router(settings, storage))
 
 
 @app.get("/health")

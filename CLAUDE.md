@@ -177,6 +177,15 @@ Editing routes (mapping-tool/service/app/wpml.py, verified with Pilot 2 on RC Pr
   `compute-agent/tools/fake_nodeodm.py` (takes the OLDEST queued job, park real jobs first).
 - Host ports on the dev Pi: MQTT 1884, MQTT-WS 8084, web 8085 (1883/8083/8080 taken by other services).
 
+## Media and flight sets (web)
+- Media list (web patches 0031/0032, MediaPanel.vue + media.vue filters) reads the mapping service
+  `/api/mapping/media/browse` + `/media/facets` (ingest: category, drone from the photo, flight set), not the DJI
+  backend list; downloads stay with the backend. Deep link `/media?set=<id8>&category=..`.
+- Flight sets page (patch 0033, flight-sets.vue): `/api/mapping/flight-sets-summary` (class mapping/oblique/flight/
+  ground from height + gimbal, PPK raw data present, samples), `/flight-sets/{id}/positions` (one point per shot),
+  `POST /flight-sets/{id}/mapping-job` (RGB/visible JPGs or band TIFs). Note the path `flight-sets-summary`:
+  `/flight-sets/{set_id}` of ingest.py would catch `/flight-sets/summary`.
+
 ## Mission planning
 - Menu "Aufgabenplaene" (task plans) = missions (web patch 0027, missions.vue); the DJI Dock task page (task.vue) is unused.
   Backend in the mapping service (app/missions.py, migration 0004): checklist per purpose, status planned ->
