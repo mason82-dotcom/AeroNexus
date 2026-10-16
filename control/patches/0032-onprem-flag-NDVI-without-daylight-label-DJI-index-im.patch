@@ -1,0 +1,114 @@
+From 98019dc91e9d3651cbcece50795a8479c0b07afe Mon Sep 17 00:00:00 2001
+From: RomaN <mason@rpi5.local>
+Date: Fri, 16 Oct 2026 08:49:54 +0200
+Subject: [PATCH] onprem: flag NDVI without daylight, label DJI index images
+
+---
+ src/components/MediaPanel.vue | 19 ++++++++++++++++++-
+ src/locales/de.ts             |  4 ++++
+ 2 files changed, 22 insertions(+), 1 deletion(-)
+
+diff --git a/src/components/MediaPanel.vue b/src/components/MediaPanel.vue
+index 8739bfc..eca7b07 100644
+--- a/src/components/MediaPanel.vue
++++ b/src/components/MediaPanel.vue
+@@ -22,6 +22,9 @@
+           <a-tag v-if="record.category" :color="CATEGORY_COLORS[record.category]">
+             {{ $t(CATEGORY_LABELS[record.category]) + (record.band && record.band !== 'F' ? ' ' + record.band : '') }}
+           </a-tag>
++          <a-tag v-if="record.band === 'F'" :title="$t('Index image coloured by the DJI camera (not raw data)')">
++            {{ $t('DJI index image') }}
++          </a-tag>
+         </template>
+         <template #drone="{ record }">
+           <a-tooltip :title="droneTooltip(record)">
+@@ -37,7 +40,9 @@
+           <a-tooltip v-if="ndvi[record.object_key]?.stats?.mean !== undefined" :title="$t('Click for the NDVI preview')">
+             <div class="ndvi-thumb" @click="openNdvi(record)">
+               <img class="thumb" loading="lazy" :alt="record.file_name" :src="msPreviewPngUrl(ndvi[record.object_key].capture)" />
+-              <span class="ndvi-badge">NDVI {{ ndvi[record.object_key].stats.mean.toFixed(2) }}</span>
++              <span class="ndvi-badge" :class="{ dark: noDaylight(ndvi[record.object_key]) }">
++                {{ noDaylight(ndvi[record.object_key]) ? $t('no daylight') : 'NDVI ' + ndvi[record.object_key].stats.mean.toFixed(2) }}
++              </span>
+             </div>
+           </a-tooltip>
+           <img v-else-if="hasThumbnail(record.file_name)" class="thumb" loading="lazy" :alt="record.file_name"
+@@ -76,6 +81,8 @@
+   </a-spin>
+   <a-modal v-model:visible="ndviModal.visible" :title="$t('NDVI preview (Mavic 3M)')" :footer="null" width="760px">
+     <template v-if="ndviModal.preview">
++      <a-alert v-if="noDaylight(ndviModal.preview)" type="warning" show-icon class="ndvi-alert"
++               :message="$t('Taken without daylight: the sunlight sensor measured almost nothing, the index values are not meaningful.')" />
+       <img class="ndvi-large" :alt="ndviModal.fileName" :src="msPreviewPngUrl(ndviModal.preview.capture)" />
+       <div class="ndvi-legend">
+         <span>-0.2</span><div class="ndvi-ramp"></div><span>0.9</span>
+@@ -224,6 +231,10 @@ interface MediaFile extends BrowseMedia {
+ // onprem: NDVI quick look of Mavic 3M shots (farming service), shown on the band TIFF rows
+ const ndvi = ref<Record<string, MsPreview | null>>({})
+ const ndviModal = reactive({ visible: false, fileName: '', preview: null as MsPreview | null })
++// sunlight sensor near zero (night, indoors): calibrated reflectance and indices are noise
++function noDaylight (p: MsPreview | null | undefined): boolean {
++  return !!p && Object.values(p.irradiance || {}).some(v => v < 50)
++}
+ function openNdvi (media: MediaFile) {
+   ndviModal.preview = ndvi.value[media.object_key] || null
+   ndviModal.fileName = media.file_name
+@@ -340,6 +351,9 @@ function downloadMedia (media: MediaFile) {
+     background: rgba(0, 0, 0, 0.65);
+     border-radius: 2px;
+   }
++  .ndvi-badge.dark {
++    background: rgba(160, 40, 40, 0.85);
++  }
+   .media-table {
+     background: #fff;
+     margin-top: 10px;
+@@ -354,6 +368,9 @@ function downloadMedia (media: MediaFile) {
+   border-radius: 2px;
+   background: #000;
+ }
++.ndvi-alert {
++  margin-bottom: 10px;
++}
+ .ndvi-legend {
+   display: flex;
+   align-items: center;
+diff --git a/src/locales/de.ts b/src/locales/de.ts
+index f778b48..f74c10e 100644
+--- a/src/locales/de.ts
++++ b/src/locales/de.ts
+@@ -111,6 +111,7 @@ export default {
+   "Disabled": "Deaktiviert",
+   "Disconnect": "Getrennt",
+   "Distance to Home Point": "Entfernung zum Homepoint",
++  "DJI index image": "DJI-Indexbild",
+   "Dock": "Dock",
+   "Dock Humidity": "Luftfeuchte im Dock",
+   "Dock Name": "Dock-Name",
+@@ -195,6 +196,7 @@ export default {
+   "Immediate": "Sofort",
+   "Import Firmware File": "Firmware-Datei importieren",
+   "In progress": "Läuft",
++  "Index image coloured by the DJI camera (not raw data)": "Von der DJI-Kamera eingefärbtes Indexbild (keine Rohdaten)",
+   "Input error": "Eingabefehler",
+   "input search message": "Meldung suchen",
+   "input search verison": "Version suchen",
+@@ -277,6 +279,7 @@ export default {
+   "New job": "Neuer Auftrag",
+   "New mapping job": "Neuer Kartierungsauftrag",
+   "No": "Nein",
++  "no daylight": "ohne Tageslicht",
+   "No Drone": "Keine Drohne",
+   "No drone serial (video)": "Keine Seriennummer (Video)",
+   "No jobs. Processing runs on the x64 compute node.": "Keine Aufträge. Gerechnet wird auf dem x64-Rechenknoten.",
+@@ -422,6 +425,7 @@ export default {
+   "Take off successfully": "Gestartet",
+   "Take Photo": "Foto aufnehmen",
+   "Take Photo successfully": "Foto aufgenommen",
++  "Taken without daylight: the sunlight sensor measured almost nothing, the index values are not meaningful.": "Ohne Tageslicht aufgenommen: Der Sonnenlicht-Sensor hat kaum etwas gemessen, die Indexwerte sind nicht aussagekräftig.",
+   "Task canceled": "Abgebrochen",
+   "Task completed": "Abgeschlossen",
+   "Task failed": "Fehlgeschlagen",
+-- 
+2.47.3
+
