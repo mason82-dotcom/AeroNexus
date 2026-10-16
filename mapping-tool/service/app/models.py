@@ -29,6 +29,26 @@ class JobCreate(BaseModel):
     image_keys: list[str] = Field(min_length=1, max_length=5000)
     profile: Literal["fast", "standard", "high", "multispectral"] = "standard"
     odm_options: dict[str, str | int | float | bool] = Field(default_factory=dict, max_length=50)
+    # ODM geo.txt with PPK camera positions (app/ppk.py): uploaded with the images, replaces their EXIF positions
+    geo: str | None = Field(default=None, max_length=2_000_000)
+
+    @field_validator("geo")
+    @classmethod
+    def geo_format(cls, geo: str | None) -> str | None:
+        if geo is None:
+            return None
+        lines = geo.strip().splitlines()
+        if not lines or lines[0].strip() != "EPSG:4326" or len(lines) < 2:
+            raise ValueError("geo must start with EPSG:4326 and list at least one image")
+        for line in lines[1:]:
+            f = line.split()
+            if len(f) < 4 or not re.match(r"^[A-Za-z0-9._-]{1,100}$", f[0]):
+                raise ValueError(f"invalid geo line: {line[:80]!r}")
+            try:
+                [float(v) for v in f[1:9]]
+            except ValueError:
+                raise ValueError(f"invalid geo line: {line[:80]!r}") from None
+        return "\n".join(lines) + "\n"
 
     @field_validator("image_keys")
     @classmethod

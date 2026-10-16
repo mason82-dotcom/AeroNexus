@@ -27,10 +27,18 @@ def _iso(value: datetime | None) -> str | None:
     return value.isoformat(timespec="seconds") + "Z" if value else None
 
 
-def _job_out(row: dict) -> dict:
+def _job_options(row: dict, full: bool) -> dict:
+    """Job options; the PPK geo.txt (up to some 100 KB) only for the agent, the web gets its line count."""
+    options = json.loads(row["options"])
+    if not full and "geo_txt" in options:
+        options["geo_positions"] = options.pop("geo_txt").count("\n") - 1
+    return options
+
+
+def _job_out(row: dict, full: bool = False) -> dict:
     return {
         "id": row["id"], "name": row["name"], "status": row["status"],
-        "image_count": len(json.loads(row["image_keys"])), "options": json.loads(row["options"]),
+        "image_count": len(json.loads(row["image_keys"])), "options": _job_options(row, full),
         "created_by": row["created_by"], "agent_id": row["agent_id"],
         "lease_until": _iso(row["lease_until"]), "attempts": row["attempts"],
         "progress": float(row["progress"]), "message": row["message"], "error": row["error"],
@@ -210,8 +218,15 @@ def build_router(settings: Settings, storage: Storage) -> APIRouter:
         unknown = [k for k in body.image_keys if k not in known]
         if unknown:
             raise HTTPException(status_code=422, detail={"unknown_image_keys": unknown[:50]})
+        if body.geo:
+            names = {k.rsplit("/", 1)[-1] for k in body.image_keys}
+            foreign = [line.split()[0] for line in body.geo.splitlines()[1:] if line.split()[0] not in names]
+            if foreign:
+                raise HTTPException(status_code=422, detail={"geo_images_not_in_job": foreign[:20]})
         job_id = str(uuid.uuid4())
         options = {"profile": body.profile, "odm": {**PROFILES[body.profile], **body.odm_options}}
+        if body.geo:
+            options["geo_txt"] = body.geo
         with db.transaction(settings) as cur:
             cur.execute(
                 "INSERT INTO mapping_job (id, workspace_id, name, status, image_keys, options, created_by)"
@@ -485,7 +500,7 @@ def build_router(settings: Settings, storage: Storage) -> APIRouter:
             cur.execute("SELECT * FROM mapping_job WHERE id = %s", (row["id"],))
             row = cur.fetchone()
         log.info("job %s claimed by %s (capabilities %s)", row["id"], body.agent_id, body.capabilities)
-        job = _job_out(row)
+        job = _job_out(row, full=True)
         return {
             "job": {k: job[k] for k in ("id", "name", "status", "options", "attempts", "lease_until")},
             "images": image_urls(json.loads(row["image_keys"])),

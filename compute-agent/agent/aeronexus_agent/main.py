@@ -96,6 +96,11 @@ def process(settings: config.Settings, pi: PiClient, odm: NodeOdmClient, claim: 
         with ThreadPoolExecutor(settings.download_workers) as pool:
             list(pool.map(fetch, images))
         hb.check()
+        # PPK camera positions (Pi app/ppk.py): ODM picks up geo.txt uploaded with the images
+        geo = job.get("options", {}).get("geo_txt")
+        if geo:
+            (img_dir / "geo.txt").write_text(geo)
+            log.info("job %s: geo.txt with %d PPK positions", job_id[:8], geo.count("\n") - 1)
 
         # 2. NodeODM task: init -> upload -> commit
         options = odm_options(job.get("options", {}), odm.options(), settings.gpu)

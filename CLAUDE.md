@@ -154,6 +154,13 @@ Editing routes (mapping-tool/service/app/wpml.py, verified with Pilot 2 on RC Pr
   below DCIM: .MRK .OBS .NAV .RTK .PBK) ALWAYS comes along under ppk/sdimport-<volume>/ (no media_file row).
   PILOT_SKIP_UPLOAD_EXT types are skipped unless `--include-ext`. Matrice 4 cards have no SRT: video telemetry
   comes from the embedded subtitle track, the model from the MP4 (moov may be at the end). Log: edge/logs/sd-import/.
+- PPK (`edge/ppk.sh <flight set> <base dir> [--create-job]`, app/ppk.py): RTKLIB demo5 b34k (rnx2rtkp) and
+  RNXCMP crx2rnx are built pinned into the mapping image. Rover = PPK raw data of the SD import (.OBS/.NAV RINEX
+  3.05, .MRK shutter GPS time + antenna->camera offset N/E/down mm; image number = MRK index per folder). DJI .RTK
+  is a proprietary binary, NOT base data: a reference station is needed (SAPOS GPPS/VRS; public EPN KARL 21 km,
+  1 s highrate at BKG, gave float only). rnx2rtkp reads only the FIRST base obs file: base files are merged.
+  Output ODM geo.txt (EPSG:4326, ellipsoidal h, accuracy floors fix 2/4 cm, float 10/20 cm) stored in the job
+  options (geo_txt, agent only); the compute agent uploads it as geo.txt and NodeODM passes --geo.
 - Object keys of Pilot 2 uploads are not reliable DJI names: some land as `wayline/org_<hash>_<ms>.<ext>`
   (seen 2026-10-15), the DJI name is only in cloud_sample.media_file.file_name. Services without DB access find
   files by content: pv pre-measurement by R-JPEG APP3 data, farming M3M bands by XMP ImageSource + CaptureUUID
