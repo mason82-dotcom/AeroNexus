@@ -21,6 +21,34 @@ DJI-Pilot-Regeln. Es gibt keine neuen Rechte für Pilot-2-Geräte, keine
 an Authentisierung oder Zugangsdaten. Die Kontoberechtigung muss weiterhin
 `is_superuser=false` haben; ein Superuser würde die ACL umgehen.
 
+## Bestätigter Pi-Betriebsstand (18.10.2026)
+
+Die aktive Installation verwendet den Docker-Container
+`aeronexusadvanced-cloud-emqx-1` und NICHT unmittelbar das hier
+versionierte `AeroNexus/edge`-Compose-Deployment. Der aktive Host-Bind-Mount
+zeigt auf:
+
+```text
+/home/mason/Projekte/AeroNexusAdvanced/cloud-server/telemetry/emqx/acl.conf
+```
+
+Der Nutzer `aeronexus_osd` darf darin derzeit nur OSD und HMS lesen;
+`state` fehlt. Das Mergen dieses PR ändert **nicht automatisch** diese
+produktive, möglicherweise separat versionierte ACL. Vor dem Rollout die
+aktive Authorizer-Dateiquelle überprüfen: EMQX kann nach Dashboard-/API-
+Änderungen `data/authz/acl.conf` statt des eingebundenen `etc/acl.conf`
+verwenden. Erst die tatsächlich geladene Quelle patchen oder über die
+zuständige Dashboard-Authorizer-Konfiguration aktualisieren.
+
+Keine Ersetzung der bind-gemounteten Datei durch atomisches Umbenennen:
+bei einem Datei-Bind-Mount kann ein neuer Host-Inode vom laufenden
+Container entkoppelt sein. Datei vorab sichern und nach Read-only-Prüfung
+kontrolliert **im bestehenden Inode** aktualisieren; erst bei abgestellter
+Drohne und erlaubter Wartungsunterbrechung Broker neu laden bzw. neu starten.
+
+Offizielle Hinweise:
+- https://docs.emqx.com/en/emqx/latest/guides/access-control/authz/file.html
+
 ## Rollout-Voraussetzungen
 
 Diese GitHub-Änderung aktualisiert **nicht** die produktive EMQX-Instanz.
