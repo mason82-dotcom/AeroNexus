@@ -1,4 +1,4 @@
-"""Offline ACL regression checks for the dedicated OSD observer account."""
+"""Offline ACL regression checks for the read-only OSD / DJI-state observer."""
 from pathlib import Path
 import unittest
 
@@ -12,11 +12,11 @@ class OsdAclTests(unittest.TestCase):
         cls.rules = [line.strip() for line in ACL.read_text().splitlines()
                      if line.strip() and not line.lstrip().startswith("%%")]
 
-    def test_dedicated_account_can_only_subscribe_osd_and_hms_events(self):
+    def test_dedicated_account_can_only_subscribe_osd_state_and_hms_events(self):
         account_rules = [rule for rule in self.rules if '"aeronexus_osd"' in rule]
         self.assertEqual(account_rules, [
             '{deny,  {username, "aeronexus_osd"}, publish,   ["#"]}.',
-            '{allow, {username, "aeronexus_osd"}, subscribe, ["thing/product/+/osd", "thing/product/+/events"]}.',
+            '{allow, {username, "aeronexus_osd"}, subscribe, ["thing/product/+/osd", "thing/product/+/state", "thing/product/+/events"]}.',
             '{deny,  {username, "aeronexus_osd"}, subscribe, ["#"]}.',
         ])
 
@@ -34,7 +34,8 @@ class OsdAclTests(unittest.TestCase):
                          '{deny,  {username, "aeronexus_osd"}, publish,   ["#"]}.')
         self.assertEqual(account_rules[-1],
                          '{deny,  {username, "aeronexus_osd"}, subscribe, ["#"]}.')
-        for forbidden in ('thing/product/+/state', 'thing/product/+/services',
+        self.assertIn('thing/product/+/state', account_rules[1])
+        for forbidden in ('thing/product/+/services',
                           'thing/product/+/drc/down', 'sys/product/+/status'):
             self.assertNotIn(forbidden, account_rules[1])
 
